@@ -92,6 +92,7 @@ final class AiAgentExecutor {
 
         procEnv.put("AI_AGENT_PROMPT", prompt);
         procEnv.put("AI_AGENT_MODEL", model);
+        procEnv.put("AI_AGENT_REASONING_EFFORT", Util.fixNull(config.getReasoningEffort()));
 
         String setupScript = Util.fixNull(config.getSetupScript()).trim();
         if (!setupScript.isEmpty() && !launcher.isUnix()) {

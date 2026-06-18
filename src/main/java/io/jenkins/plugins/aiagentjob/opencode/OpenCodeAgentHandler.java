@@ -44,6 +44,11 @@ public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
             command.add("--model");
             command.add(model);
         }
+        String reasoningEffort = Util.fixEmptyAndTrim(config.getReasoningEffort());
+        if (reasoningEffort != null) {
+            command.add("--variant");
+            command.add(reasoningEffort);
+        }
         command.add(prompt);
         return command;
     }

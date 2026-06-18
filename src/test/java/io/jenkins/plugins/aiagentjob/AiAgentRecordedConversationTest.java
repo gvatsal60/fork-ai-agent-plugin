@@ -113,7 +113,7 @@ class AiAgentRecordedConversationTest {
         assertTrue(cats.contains("tool_call"), "Should have tool_call");
         assertTrue(cats.contains("tool_result"), "Should have tool_result");
         assertTrue(cats.contains("assistant"), "Should have assistant");
-        assertEquals(6, events.size(), "Current Codex fixture should render 6 visible events");
+        assertEquals(11, events.size(), "Current Codex fixture should render 11 visible events");
     }
 
     @Test

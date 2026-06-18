@@ -30,6 +30,7 @@ class AiAgentBuilderConfigRoundTripTest {
         builder.setAgent(new GeminiCliAgentHandler());
         builder.setPrompt("Summarize this repository.");
         builder.setModel("gemini-2.5-pro");
+        builder.setReasoningEffort("high");
         builder.setWorkingDirectory("src");
         builder.setYoloMode(false);
         builder.setRequireApprovals(true);
@@ -49,6 +50,7 @@ class AiAgentBuilderConfigRoundTripTest {
         assertEquals("GEMINI_CLI", reloaded.getAgent().getId());
         assertEquals("Summarize this repository.", reloaded.getPrompt());
         assertEquals("gemini-2.5-pro", reloaded.getModel());
+        assertEquals("high", reloaded.getReasoningEffort());
         assertEquals("src", reloaded.getWorkingDirectory());
         assertFalse(reloaded.isYoloMode());
         assertTrue(reloaded.isRequireApprovals());

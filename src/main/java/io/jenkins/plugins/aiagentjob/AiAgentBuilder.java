@@ -42,6 +42,7 @@ import java.util.List;
 public class AiAgentBuilder extends Builder implements SimpleBuildStep, AiAgentConfiguration {
     private AiAgentTypeHandler agent = new ClaudeCodeAgentHandler();
     private String model = "";
+    private String reasoningEffort = "";
     private String prompt = "";
     private String workingDirectory = "";
     private boolean yoloMode;
@@ -105,6 +106,16 @@ public class AiAgentBuilder extends Builder implements SimpleBuildStep, AiAgentC
     @DataBoundSetter
     public void setModel(String model) {
         this.model = Util.fixNull(model);
+    }
+
+    @Override
+    public String getReasoningEffort() {
+        return reasoningEffort;
+    }
+
+    @DataBoundSetter
+    public void setReasoningEffort(String reasoningEffort) {
+        this.reasoningEffort = Util.fixNull(reasoningEffort);
     }
 
     @Override
@@ -247,6 +258,7 @@ public class AiAgentBuilder extends Builder implements SimpleBuildStep, AiAgentC
             agent = new ClaudeCodeAgentHandler();
         }
         model = Util.fixNull(model);
+        reasoningEffort = Util.fixNull(reasoningEffort);
         prompt = Util.fixNull(prompt);
         workingDirectory = Util.fixNull(workingDirectory);
         commandOverride = normalizeCommandOverride(commandOverride);

@@ -138,7 +138,7 @@ class AiAgentLogParserTest {
                 cats.contains("tool_result"),
                 "Should have tool_result (command_execution completed)");
         assertTrue(cats.contains("assistant"), "Should have assistant (agent_message)");
-        assertEquals(6, events.size(), "Current Codex fixture should keep only 6 visible events");
+        assertEquals(11, events.size(), "Current Codex fixture should keep 11 visible events");
     }
 
     @Test
@@ -150,9 +150,11 @@ class AiAgentLogParserTest {
                         .filter(e -> "tool_call".equals(e.getCategory()))
                         .collect(Collectors.toList());
 
-        assertEquals(2, toolCalls.size(), "Should have 2 visible command starts");
-        assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("git remote -v")));
+        assertEquals(4, toolCalls.size(), "Should have 3 command starts and 1 MCP tool call");
         assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("rg --files")));
+        assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("sed -n")));
+        assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("mvn -q")));
+        assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("server")));
     }
 
     @Test
@@ -161,9 +163,8 @@ class AiAgentLogParserTest {
                 parseFixture("codex-conversation.jsonl", CodexLogFormat.INSTANCE);
         long started = events.stream().filter(e -> "tool_call".equals(e.getCategory())).count();
         long completed = events.stream().filter(e -> "tool_result".equals(e.getCategory())).count();
-        assertEquals(2, started, "Fixture should keep both started commands visible");
-        assertEquals(
-                1, completed, "Only the command with aggregated output should render a result");
+        assertEquals(4, started, "Fixture should keep command and MCP starts visible");
+        assertEquals(3, completed, "Empty command completion should not render a result");
     }
 
     @Test
@@ -175,8 +176,12 @@ class AiAgentLogParserTest {
                         .filter(e -> "tool_result".equals(e.getCategory()))
                         .collect(Collectors.toList());
 
-        assertEquals(1, toolResults.size(), "Should have exactly 1 visible tool result");
-        assertTrue(toolResults.get(0).getToolOutput().contains("github.com-personal"));
+        assertEquals(3, toolResults.size(), "Should have 3 visible tool results");
+        assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("README.md")));
+        assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("sample-plugin")));
+        assertTrue(
+                toolResults.stream()
+                        .anyMatch(e -> e.getToolOutput().contains("No external resources")));
     }
 
     // ======================== Cursor Agent Tests ========================
@@ -666,7 +671,7 @@ class AiAgentLogParserTest {
     void codexConversation_hasCorrectEventCount() throws IOException {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("codex-conversation.jsonl", CodexLogFormat.INSTANCE);
-        assertEquals(6, events.size(), "Current Codex fixture should produce 6 visible events");
+        assertEquals(11, events.size(), "Current Codex fixture should produce 11 visible events");
     }
 
     @Test

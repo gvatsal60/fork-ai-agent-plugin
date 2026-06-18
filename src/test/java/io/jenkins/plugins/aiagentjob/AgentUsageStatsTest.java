@@ -96,9 +96,10 @@ class AgentUsageStatsTest {
         AgentUsageStats stats = parseStats("stats-codex.jsonl", CodexStatsExtractor.INSTANCE);
 
         assertTrue(stats.hasData());
-        assertEquals(25602, stats.getInputTokens());
-        assertEquals(116, stats.getOutputTokens());
-        assertEquals(3456, stats.getCacheReadTokens());
+        assertEquals(42581, stats.getInputTokens());
+        assertEquals(108, stats.getOutputTokens());
+        assertEquals(30976, stats.getCacheReadTokens());
+        assertEquals(49, stats.getReasoningTokens());
     }
 
     @Test

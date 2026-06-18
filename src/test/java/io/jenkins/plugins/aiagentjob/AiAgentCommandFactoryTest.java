@@ -96,6 +96,18 @@ class AiAgentCommandFactoryTest {
         assertEquals("claude-opus-4", cmd.get(modelIdx + 1));
     }
 
+    @Test
+    void claudeCode_withReasoningEffort() {
+        AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
+        project.setReasoningEffort("xhigh");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        int effortIdx = cmd.indexOf("--effort");
+        assertTrue(effortIdx >= 0, "Should have --effort");
+        assertEquals("xhigh", cmd.get(effortIdx + 1));
+    }
+
     // ======================== Codex Command Tests ========================
 
     @Test
@@ -105,7 +117,7 @@ class AiAgentCommandFactoryTest {
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "fix the bug");
 
         assertEquals("codex", cmd.get(0));
-        assertEquals("exec", cmd.get(1));
+        assertTrue(cmd.indexOf("exec") > 0, "Should run codex exec");
         assertTrue(cmd.contains("--json"), "Should have --json for JSONL output");
         assertTrue(
                 cmd.contains("--skip-git-repo-check"),
@@ -124,7 +136,9 @@ class AiAgentCommandFactoryTest {
                 cmd.contains("--dangerously-bypass-approvals-and-sandbox"),
                 "Should have --dangerously-bypass-approvals-and-sandbox");
         assertFalse(cmd.contains("--sandbox"), "Should NOT have --sandbox");
-        assertFalse(cmd.contains("--full-auto"), "Should NOT have --full-auto in yolo mode");
+        assertFalse(
+                cmd.contains("--ask-for-approval"),
+                "Should NOT have --ask-for-approval in yolo mode");
     }
 
     @Test
@@ -136,10 +150,12 @@ class AiAgentCommandFactoryTest {
 
         assertTrue(cmd.contains("--sandbox"), "Should have --sandbox");
         assertTrue(cmd.contains("workspace-write"), "Should have workspace-write");
-        assertTrue(cmd.contains("--full-auto"), "Should have --full-auto for headless execution");
-        assertFalse(
-                cmd.contains("--ask-for-approval"),
-                "Should NOT have --ask-for-approval (not valid for codex exec)");
+        int approvalIdx = cmd.indexOf("--ask-for-approval");
+        assertTrue(approvalIdx > 0, "Should have --ask-for-approval for headless execution");
+        assertEquals("never", cmd.get(approvalIdx + 1));
+        assertTrue(cmd.indexOf("--sandbox") < cmd.indexOf("exec"), "--sandbox is a global flag");
+        assertTrue(approvalIdx < cmd.indexOf("exec"), "--ask-for-approval is a global flag");
+        assertFalse(cmd.contains("--full-auto"), "Should not use removed --full-auto flag");
     }
 
     @Test
@@ -155,12 +171,46 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
+    void codex_withReasoningEffort() {
+        AiAgentBuilder project = createProject(new CodexAgentHandler());
+        project.setReasoningEffort("high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        int configIdx = cmd.indexOf("-c");
+        assertTrue(configIdx > 0, "Should have config override");
+        assertEquals("model_reasoning_effort=\"high\"", cmd.get(configIdx + 1));
+        assertTrue(configIdx < cmd.indexOf("exec"), "Codex reasoning effort is a global config");
+    }
+
+    @Test
     void codex_promptIsLastArgument() {
         AiAgentBuilder project = createProject(new CodexAgentHandler());
 
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "refactor this");
 
         assertEquals("refactor this", cmd.get(cmd.size() - 1), "Prompt should be last argument");
+    }
+
+    @Test
+    void codex_additionalArgsArePlacedInCodexScopes() {
+        CodexAgentHandler codex = new CodexAgentHandler();
+        codex.setAdditionalGlobalArgs("--search --profile ci");
+        codex.setAdditionalExecArgs("--ephemeral --ignore-user-config --color never");
+        AiAgentBuilder project = createProject(codex);
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        int execIdx = cmd.indexOf("exec");
+        int promptIdx = cmd.indexOf("test");
+        assertTrue(cmd.indexOf("--search") > 0 && cmd.indexOf("--search") < execIdx);
+        assertTrue(cmd.indexOf("--profile") > 0 && cmd.indexOf("--profile") < execIdx);
+        assertEquals("ci", cmd.get(cmd.indexOf("--profile") + 1));
+        assertTrue(cmd.indexOf("--ephemeral") > execIdx && cmd.indexOf("--ephemeral") < promptIdx);
+        assertTrue(
+                cmd.indexOf("--ignore-user-config") > execIdx
+                        && cmd.indexOf("--ignore-user-config") < promptIdx);
+        assertEquals("never", cmd.get(cmd.indexOf("--color") + 1));
     }
 
     // ======================== Cursor Agent Command Tests ========================
@@ -228,6 +278,18 @@ class AiAgentCommandFactoryTest {
         int modelIdx = cmd.indexOf("--model");
         assertTrue(modelIdx >= 0, "Should have --model");
         assertEquals("anthropic/claude-sonnet-4", cmd.get(modelIdx + 1));
+    }
+
+    @Test
+    void openCode_withReasoningEffort() {
+        AiAgentBuilder project = createProject(new OpenCodeAgentHandler());
+        project.setReasoningEffort("max");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        int variantIdx = cmd.indexOf("--variant");
+        assertTrue(variantIdx >= 0, "Should have --variant");
+        assertEquals("max", cmd.get(variantIdx + 1));
     }
 
     // ======================== Gemini CLI Command Tests ========================

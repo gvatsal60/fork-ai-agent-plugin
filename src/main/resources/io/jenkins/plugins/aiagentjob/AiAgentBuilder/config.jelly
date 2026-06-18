@@ -10,6 +10,10 @@
     <f:textbox />
   </f:entry>
 
+  <f:entry title="Reasoning effort (optional)" field="reasoningEffort">
+    <f:textbox />
+  </f:entry>
+
   <f:entry title="Working directory" field="workingDirectory" description="Relative to the job workspace. Leave empty to run in workspace root.">
     <f:textbox />
   </f:entry>
