@@ -5,4 +5,13 @@
       <f:textarea />
     </f:entry>
   </f:optionalBlock>
+
+  <f:advanced>
+    <f:entry title="Additional Codex global args" field="additionalGlobalArgs">
+      <f:textbox />
+    </f:entry>
+    <f:entry title="Additional Codex exec args" field="additionalExecArgs">
+      <f:textbox />
+    </f:entry>
+  </f:advanced>
 </j:jelly>

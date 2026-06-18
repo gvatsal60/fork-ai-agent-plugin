@@ -373,6 +373,13 @@ public final class AgentUsageStats implements Serializable {
                                 usage.optLong(
                                         "cacheWriteTokens",
                                         usage.optLong("cacheCreationInputTokens", 0))));
+        reasoningTokens =
+                Math.max(
+                        reasoningTokens,
+                        usage.optLong(
+                                "reasoning_output_tokens",
+                                usage.optLong(
+                                        "reasoningTokens", usage.optLong("reasoning_output", 0))));
 
         // Codex uses cached_input_tokens
         if (usage.has("cached_input_tokens") && !usage.has("cache_read_input_tokens")) {

@@ -17,7 +17,7 @@ Plugin ID (artifactId): `ai-agent`
 - **Markdown rendering** — assistant and result messages are rendered as formatted HTML.
 - **Approval gates** — optionally pause builds for human review before tool execution.
 - **Usage statistics** — token counts, cost, and duration extracted from agent logs and displayed per build.
-- **Codex per-job config** — optionally provide a job-scoped `~/.codex/config.toml` to override settings/MCP for Codex runs.
+- **Codex controls** — job-scoped `~/.codex/config.toml`, global Codex args, and `codex exec` args for Codex runs.
 - **Standard Jenkins integrations** — SCM checkout, build triggers, credentials injection, post-build shell steps, and publishers.
 
 ## Supported Agents
@@ -59,10 +59,12 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
    - **Agent Type** — select the coding agent to run.
    - **Prompt** — the task to send to the agent.
    - **Model** — optional model override (e.g., `claude-sonnet-4`).
+   - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`).
    - **YOLO mode** — skip confirmation prompts in the agent.
    - **Approvals** — require human approval for tool calls.
    - **Setup script** — shell commands to run before the agent (install tools, source dotfiles, export secrets).
    - **Custom Codex config.toml** — optional, shown only for Codex runs to override settings/MCP per job.
+   - **Additional Codex args** — optional, shown only for Codex runs to pass global flags like `--search` or exec flags like `--ephemeral`.
    - **Environment variables** — inject additional env vars (`KEY=VALUE`, one per line).
    - **Command override** — replace the default command template entirely.
    - **Extra CLI args** — append flags to the generated command.
@@ -99,9 +101,12 @@ Codex with job-scoped `config.toml`:
 aiAgent(
   agent: codex(
     customConfigEnabled: true,
-    customConfigToml: '[model]\\nname = \"gpt-5\"'
+    customConfigToml: 'model = \"gpt-5.5\"',
+    additionalGlobalArgs: '--search',
+    additionalExecArgs: '--ephemeral --color never'
   ),
   prompt: 'Summarize this project',
+  reasoningEffort: 'xhigh',
   approvalTimeoutSeconds: 60
 )
 ```
@@ -123,6 +128,7 @@ The plugin injects these variables into every build:
 |----------|-------------|
 | `AI_AGENT_PROMPT` | The configured prompt text |
 | `AI_AGENT_MODEL` | The configured model name |
+| `AI_AGENT_REASONING_EFFORT` | The configured reasoning effort |
 
 ### Setup Script
 
@@ -157,6 +163,28 @@ For **Codex CLI** jobs, you can enable a custom config and paste TOML content eq
 `~/.codex/config.toml`. At runtime, the plugin creates a temporary home directory for the build,
 writes `.codex/config.toml` there, and launches Codex with that run-scoped home so settings/MCP
 overrides apply only to that job run.
+
+By default, Codex runs as:
+
+```bash
+codex --sandbox workspace-write --ask-for-approval never exec --json --skip-git-repo-check '<prompt>'
+```
+
+Use **Additional Codex global args** for flags that must appear before `exec`, such as
+`--search`, `--profile ci`, `-c key=value`, `--enable feature`, or `--image path.png`.
+Use **Additional Codex exec args** for flags after `exec`, such as `--ephemeral`,
+`--ignore-user-config`, `--ignore-rules`, `--add-dir path`, `--output-schema schema.json`,
+or `--color never`. Keep secrets in Jenkins credentials or config, not in CLI args.
+
+### Reasoning Effort
+
+The **Reasoning effort** field is passed only to agents with verified CLI support:
+
+- Codex CLI: `-c model_reasoning_effort="<value>"`
+- Claude Code: `--effort <value>`
+- OpenCode: `--variant <value>`
+
+Gemini CLI and Cursor Agent currently ignore the field in the built-in command template.
 
 ### Credential Injection
 

@@ -319,7 +319,7 @@ class AiAgentBuildExecutionTest {
                         b -> {
                             CodexAgentHandler codex = new CodexAgentHandler();
                             codex.setCustomConfigEnabled(true);
-                            codex.setCustomConfigToml("[model]\nname = \"gpt-5\"");
+                            codex.setCustomConfigToml("model = \"gpt-5.5\"");
                             b.setAgent(codex);
                             b.setPrompt("hello");
                             b.setCommandOverride(

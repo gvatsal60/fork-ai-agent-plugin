@@ -24,6 +24,8 @@ import java.util.List;
 public final class CodexAgentHandler extends AiAgentTypeHandler {
     private boolean customConfigEnabled;
     private String customConfigToml = "";
+    private String additionalGlobalArgs = "";
+    private String additionalExecArgs = "";
 
     @DataBoundConstructor
     public CodexAgentHandler() {}
@@ -42,23 +44,45 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
     public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
         List<String> command = new ArrayList<>();
         command.add("codex");
-        command.add("exec");
-        command.add("--json");
-        command.add("--skip-git-repo-check");
+        addTokenizedArgs(command, additionalGlobalArgs);
         if (config.isYoloMode()) {
             command.add("--dangerously-bypass-approvals-and-sandbox");
         } else {
             command.add("--sandbox");
             command.add("workspace-write");
-            command.add("--full-auto");
+            command.add("--ask-for-approval");
+            command.add("never");
         }
         String model = Util.fixEmptyAndTrim(config.getModel());
         if (model != null) {
             command.add("--model");
             command.add(model);
         }
+        String reasoningEffort = Util.fixEmptyAndTrim(config.getReasoningEffort());
+        if (reasoningEffort != null) {
+            command.add("-c");
+            command.add("model_reasoning_effort=" + tomlString(reasoningEffort));
+        }
+        command.add("exec");
+        command.add("--json");
+        command.add("--skip-git-repo-check");
+        addTokenizedArgs(command, additionalExecArgs);
         command.add(prompt);
         return command;
+    }
+
+    private static void addTokenizedArgs(List<String> command, String rawArgs) {
+        String args = Util.fixEmptyAndTrim(rawArgs);
+        if (args == null) {
+            return;
+        }
+        for (String arg : Util.tokenize(args)) {
+            command.add(arg);
+        }
+    }
+
+    private static String tomlString(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     @Override
@@ -99,6 +123,31 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
     @DataBoundSetter
     public void setCustomConfigToml(String customConfigToml) {
         this.customConfigToml = Util.fixNull(customConfigToml);
+    }
+
+    public String getAdditionalGlobalArgs() {
+        return additionalGlobalArgs;
+    }
+
+    @DataBoundSetter
+    public void setAdditionalGlobalArgs(String additionalGlobalArgs) {
+        this.additionalGlobalArgs = Util.fixNull(additionalGlobalArgs);
+    }
+
+    public String getAdditionalExecArgs() {
+        return additionalExecArgs;
+    }
+
+    @DataBoundSetter
+    public void setAdditionalExecArgs(String additionalExecArgs) {
+        this.additionalExecArgs = Util.fixNull(additionalExecArgs);
+    }
+
+    private Object readResolve() {
+        customConfigToml = Util.fixNull(customConfigToml);
+        additionalGlobalArgs = Util.fixNull(additionalGlobalArgs);
+        additionalExecArgs = Util.fixNull(additionalExecArgs);
+        return this;
     }
 
     @Override

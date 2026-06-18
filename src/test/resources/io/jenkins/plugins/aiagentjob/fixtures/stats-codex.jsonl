@@ -1,5 +1,4 @@
 {"type":"thread.started","thread_id":"test-codex-thread-01"}
 {"type":"turn.started"}
-{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"Thinking about greeting"}}
-{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"hi!"}}
-{"type":"turn.completed","usage":{"input_tokens":25602,"cached_input_tokens":3456,"output_tokens":116}}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}
+{"type":"turn.completed","usage":{"input_tokens":42581,"cached_input_tokens":30976,"output_tokens":108,"reasoning_output_tokens":49}}

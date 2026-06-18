@@ -49,6 +49,11 @@ public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
             command.add("--model");
             command.add(model);
         }
+        String reasoningEffort = Util.fixEmptyAndTrim(config.getReasoningEffort());
+        if (reasoningEffort != null) {
+            command.add("--effort");
+            command.add(reasoningEffort);
+        }
         return command;
     }
 

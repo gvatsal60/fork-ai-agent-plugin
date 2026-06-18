@@ -6,6 +6,8 @@ public interface AiAgentConfiguration {
 
     String getModel();
 
+    String getReasoningEffort();
+
     String getPrompt();
 
     String getWorkingDirectory();
