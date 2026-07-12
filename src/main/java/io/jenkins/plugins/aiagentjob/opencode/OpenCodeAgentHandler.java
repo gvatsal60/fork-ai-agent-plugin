@@ -16,6 +16,7 @@ import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
@@ -51,6 +52,53 @@ public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
         }
         command.add(prompt);
         return command;
+    }
+
+    @Override
+    public AcpExecutionSpec buildAcpExecution(AiAgentConfiguration config) {
+        List<String> command = new ArrayList<>();
+        command.add("opencode");
+        command.add("acp");
+
+        String model = Util.fixNull(config.getModel()).trim();
+        String reasoningEffort = Util.fixNull(config.getReasoningEffort()).trim();
+        List<String> extraArgs =
+                new ArrayList<>(Arrays.asList(Util.tokenize(Util.fixNull(config.getExtraArgs()))));
+        for (int i = 0; i < extraArgs.size(); i++) {
+            String arg = extraArgs.get(i);
+            if ("--model".equals(arg) || "-m".equals(arg)) {
+                if (i + 1 < extraArgs.size()) {
+                    model = extraArgs.get(++i);
+                }
+                continue;
+            }
+            if (arg.startsWith("--model=")) {
+                model = arg.substring("--model=".length());
+                continue;
+            }
+            if ("--variant".equals(arg)) {
+                if (i + 1 < extraArgs.size()) {
+                    reasoningEffort = extraArgs.get(++i);
+                }
+                continue;
+            }
+            if (arg.startsWith("--variant=")) {
+                reasoningEffort = arg.substring("--variant=".length());
+                continue;
+            }
+            if ("--format".equals(arg)) {
+                if (i + 1 < extraArgs.size()) {
+                    i++;
+                }
+                continue;
+            }
+            if (arg.startsWith("--format=")) {
+                continue;
+            }
+            command.add(arg);
+        }
+
+        return new AcpExecutionSpec(command, model, reasoningEffort);
     }
 
     @Override

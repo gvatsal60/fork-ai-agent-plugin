@@ -33,6 +33,14 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
 
     public abstract List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt);
 
+    /**
+     * Returns an ACP server command when this agent needs a bidirectional approval channel, or
+     * {@code null} when its normal command handles approvals directly.
+     */
+    public AcpExecutionSpec buildAcpExecution(AiAgentConfiguration config) {
+        return null;
+    }
+
     public AiAgentExecutionCustomization prepareExecution(
             AiAgentConfiguration config, FilePath workspace, TaskListener listener)
             throws IOException, InterruptedException {
@@ -55,4 +63,29 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
      * false} for any JSON it does not recognise, so the shared extractor handles it as a fallback.
      */
     public abstract AiAgentStatsExtractor getStatsExtractor();
+
+    /** Immutable settings for an Agent Client Protocol execution. */
+    public static final class AcpExecutionSpec {
+        private final List<String> command;
+        private final String model;
+        private final String reasoningEffort;
+
+        public AcpExecutionSpec(List<String> command, String model, String reasoningEffort) {
+            this.command = command == null ? List.of() : List.copyOf(command);
+            this.model = model == null ? "" : model;
+            this.reasoningEffort = reasoningEffort == null ? "" : reasoningEffort;
+        }
+
+        public List<String> getCommand() {
+            return command;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public String getReasoningEffort() {
+            return reasoningEffort;
+        }
+    }
 }

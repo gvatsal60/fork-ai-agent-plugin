@@ -12,11 +12,13 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Result;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
+import hudson.model.queue.QueueTaskFuture;
 import hudson.slaves.DumbSlave;
 import hudson.slaves.WorkspaceList;
 
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
+import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -25,7 +27,10 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import java.io.File;
+import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.concurrent.TimeUnit;
 
 @WithJenkins
 class AiAgentBuildExecutionTest {
@@ -240,6 +245,105 @@ class AiAgentBuildExecutionTest {
         AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
         assertNotNull(action);
         assertTrue(action.getEvents().stream().anyMatch(e -> "tool_call".equals(e.getCategory())));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void openCodeAcp_waitsForJenkinsApprovalBeforeToolExecution(JenkinsRule jenkins)
+            throws Exception {
+        File fakeBin = new File(jenkins.jenkins.getRootDir(), "fake-opencode-bin");
+        assertTrue(fakeBin.mkdirs());
+        File fakeOpenCode = new File(fakeBin, "opencode");
+        try (InputStream fixture =
+                getClass()
+                        .getResourceAsStream(
+                                "/io/jenkins/plugins/aiagentjob/fixtures/fake-opencode-acp.sh")) {
+            assertNotNull(fixture);
+            Files.copy(fixture, fakeOpenCode.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+        assertTrue(fakeOpenCode.setExecutable(true));
+
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-opencode-acp-approval",
+                        b -> {
+                            b.setAgent(new OpenCodeAgentHandler());
+                            b.setPrompt("create approved.txt");
+                            b.setRequireApprovals(true);
+                            b.setApprovalTimeoutSeconds(30);
+                            b.setModel("test/provider-model");
+                            b.setExtraArgs("--variant high --format json --pure");
+                            b.setSetupScript("cd \"${WORKSPACE}\"");
+                            b.setEnvironmentVariables("PATH=" + path);
+                            b.setFailOnAgentError(true);
+                        });
+        DumbSlave agent = jenkins.createOnlineSlave();
+        project.setAssignedNode(agent);
+
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild runningBuild = future.waitForStart();
+        ExecutionRegistry.PendingApproval pending =
+                waitForPendingApproval(jenkins, runningBuild, future);
+        AiAgentRunAction action = runningBuild.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        ExecutionRegistry.LiveExecution liveExecution =
+                ExecutionRegistry.get(runningBuild, action.getLatestInvocationId());
+        assertNotNull(liveExecution);
+        FilePath runningWorkspace = runningBuild.getWorkspace();
+        assertNotNull(runningWorkspace);
+        assertFalse(runningWorkspace.child("approved.txt").exists());
+        assertTrue(liveExecution.approve(pending.getId()));
+
+        FreeStyleBuild build = future.get(20, TimeUnit.SECONDS);
+        jenkins.assertBuildStatusSuccess(build);
+        FilePath buildWorkspace = build.getWorkspace();
+        assertNotNull(buildWorkspace);
+        assertTrue(buildWorkspace.child("approved.txt").exists());
+        assertTrue(
+                buildWorkspace
+                        .child("approval-response.json")
+                        .readToString()
+                        .contains("\"optionId\":\"once\""));
+        String configRequests = buildWorkspace.child("config-requests.jsonl").readToString();
+        assertTrue(
+                configRequests.contains(
+                        "\"configId\":\"model\",\"value\":\"test/provider-model\""));
+        assertTrue(configRequests.contains("\"configId\":\"effort\",\"value\":\"high\""));
+        assertTrue(buildWorkspace.child("acp-command.txt").readToString().contains("acp --pure"));
+
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+        assertTrue(rawLog.contains("session/request_permission"));
+        assertFalse(rawLog.contains("\"configOptions\""));
+        assertFalse(rawLog.contains("private-test-command"));
+        assertFalse(rawLog.contains("private-test-content"));
+        assertTrue(action.getEvents().stream().anyMatch(e -> "tool_call".equals(e.getCategory())));
+        assertTrue(action.getEvents().stream().anyMatch(e -> "assistant".equals(e.getCategory())));
+    }
+
+    private static ExecutionRegistry.PendingApproval waitForPendingApproval(
+            JenkinsRule jenkins, FreeStyleBuild build, QueueTaskFuture<FreeStyleBuild> future)
+            throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+            int invocationId = action == null ? 0 : action.getLatestInvocationId();
+            ExecutionRegistry.LiveExecution liveExecution =
+                    invocationId == 0 ? null : ExecutionRegistry.get(build, invocationId);
+            if (liveExecution != null && !liveExecution.getPendingApprovals().isEmpty()) {
+                return liveExecution.getPendingApprovals().get(0);
+            }
+            if (future.isDone()) {
+                FreeStyleBuild completed = future.get();
+                throw new AssertionError(
+                        "OpenCode ACP build completed before requesting approval:\n"
+                                + jenkins.getLog(completed));
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("OpenCode ACP approval request did not reach Jenkins.");
     }
 
     @Test

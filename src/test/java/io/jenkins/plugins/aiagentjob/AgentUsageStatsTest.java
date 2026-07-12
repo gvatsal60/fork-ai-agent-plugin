@@ -140,6 +140,24 @@ class AgentUsageStatsTest {
         assertEquals(0.005 + 0.003, stats.getCostUsd(), 0.0001);
     }
 
+    @Test
+    void openCode_acpUsageUsesLatestCumulativeValues() {
+        AgentUsageStats stats = new AgentUsageStats();
+        JSONObject first =
+                JSONObject.fromObject(
+                        "{\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"usage_update\",\"used\":40,\"cost\":{\"amount\":0.01,\"currency\":\"USD\"}}}}");
+        JSONObject second =
+                JSONObject.fromObject(
+                        "{\"method\":\"session/update\",\"params\":{\"update\":{\"sessionUpdate\":\"usage_update\",\"used\":55,\"cost\":{\"amount\":0.02,\"currency\":\"USD\"}}}}");
+
+        stats.extractFrom(first, OpenCodeStatsExtractor.INSTANCE);
+        stats.extractFrom(second, OpenCodeStatsExtractor.INSTANCE);
+
+        assertEquals(55, stats.getInputTokens());
+        assertEquals(55, stats.getTotalTokens());
+        assertEquals(0.02, stats.getCostUsd(), 0.0001);
+    }
+
     // ======================== Cursor ========================
 
     @Test

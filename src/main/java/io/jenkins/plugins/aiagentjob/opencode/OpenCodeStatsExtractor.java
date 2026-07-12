@@ -8,9 +8,8 @@ import net.sf.json.JSONObject;
 import java.util.Locale;
 
 /**
- * Stats extractor for OpenCode JSONL output. OpenCode reports per-step usage in "step_finish"
- * events with a nested "part" object containing cost, tokens, and cache data. Values are
- * accumulated additively across multiple steps.
+ * Stats extractor for OpenCode output. Run mode reports additive per-step usage; ACP mode reports
+ * cumulative context and cost updates.
  */
 public final class OpenCodeStatsExtractor implements AiAgentStatsExtractor {
 
@@ -20,6 +19,21 @@ public final class OpenCodeStatsExtractor implements AiAgentStatsExtractor {
 
     @Override
     public boolean extract(JSONObject json, AgentUsageStats stats) {
+        if ("session/update".equals(json.optString("method", ""))) {
+            JSONObject params = json.optJSONObject("params");
+            JSONObject update = params == null ? null : params.optJSONObject("update");
+            if (update != null && "usage_update".equals(update.optString("sessionUpdate", ""))) {
+                long used = update.optLong("used", 0);
+                stats.addInputTokens(used);
+                stats.addTotalTokens(used);
+                JSONObject cost = update.optJSONObject("cost");
+                if (cost != null && "USD".equalsIgnoreCase(cost.optString("currency", ""))) {
+                    stats.addCostUsd(cost.optDouble("amount", 0));
+                }
+                return true;
+            }
+        }
+
         String type = json.optString("type", "").toLowerCase(Locale.ROOT);
 
         if ("step_finish".equals(type)) {

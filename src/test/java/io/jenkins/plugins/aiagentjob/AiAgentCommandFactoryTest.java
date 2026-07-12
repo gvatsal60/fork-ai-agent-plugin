@@ -292,6 +292,21 @@ class AiAgentCommandFactoryTest {
         assertEquals("max", cmd.get(variantIdx + 1));
     }
 
+    @Test
+    void openCode_acpExecutionMapsRunOptionsToSessionConfig() {
+        OpenCodeAgentHandler handler = new OpenCodeAgentHandler();
+        AiAgentBuilder project = createProject(handler);
+        project.setModel("opencode/provider-model");
+        project.setReasoningEffort("high");
+        project.setExtraArgs("--model override/model --variant=xhigh --format json --pure");
+
+        AiAgentTypeHandler.AcpExecutionSpec execution = handler.buildAcpExecution(project);
+
+        assertEquals(List.of("opencode", "acp", "--pure"), execution.getCommand());
+        assertEquals("override/model", execution.getModel());
+        assertEquals("xhigh", execution.getReasoningEffort());
+    }
+
     // ======================== Gemini CLI Command Tests ========================
 
     @Test
