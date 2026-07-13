@@ -194,6 +194,8 @@ If the selected agent type has an associated credential ID (e.g., API key), the 
 
 When approvals are enabled and YOLO mode is off, tool calls detected in the agent's output trigger a blocking approval request. The build pauses until a user approves or denies from the build page. Denied or timed-out requests fail the build.
 
+OpenCode approval builds use its bidirectional Agent Client Protocol server. The installed OpenCode CLI must support `opencode acp`. OpenCode builds without manual approvals continue to use `opencode run`.
+
 ### Usage Statistics
 
 After a build completes, a statistics bar shows token usage, cost (when available), and duration. Data is extracted from the agent's own reporting in the JSONL log. The level of detail depends on the agent — Claude Code and OpenCode report full cost, while others report only token counts.
