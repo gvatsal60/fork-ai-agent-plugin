@@ -42,6 +42,7 @@ public class AiAgentRunAction implements Action, RunAction2 {
     private static final String RAW_LOG_FILE_SUFFIX = ".jsonl";
 
     private transient Run<?, ?> run;
+    private transient Object stateLock = new Object();
     private List<InvocationRecord> invocations = new ArrayList<>();
     private int nextInvocationId = 1;
 
@@ -73,15 +74,17 @@ public class AiAgentRunAction implements Action, RunAction2 {
 
     @Override
     public void onAttached(Run<?, ?> run) {
+        initializeTransientState();
         this.run = run;
     }
 
     @Override
     public void onLoad(Run<?, ?> run) {
+        initializeTransientState();
         this.run = run;
     }
 
-    public synchronized int markStarted(
+    public int markStarted(
             String agentTypeDisplayName,
             String prompt,
             String model,
@@ -89,121 +92,153 @@ public class AiAgentRunAction implements Action, RunAction2 {
             boolean yoloMode,
             boolean approvalsEnabled)
             throws IOException {
-        int id = nextInvocationId++;
-        InvocationRecord invocation =
-                new InvocationRecord(
-                        id,
-                        agentTypeDisplayName == null ? "" : agentTypeDisplayName,
-                        prompt == null ? "" : prompt,
-                        model == null ? "" : model,
-                        commandLine == null ? "" : commandLine,
-                        yoloMode,
-                        approvalsEnabled,
-                        System.currentTimeMillis());
-        invocations.add(invocation);
-        run.save();
-        return id;
-    }
-
-    public synchronized void markCompleted(int invocationId, int exitCode) throws IOException {
-        InvocationRecord invocation = getInvocation(invocationId);
-        if (invocation == null) {
-            return;
+        synchronized (stateLock) {
+            int id = nextInvocationId++;
+            InvocationRecord invocation =
+                    new InvocationRecord(
+                            id,
+                            agentTypeDisplayName == null ? "" : agentTypeDisplayName,
+                            prompt == null ? "" : prompt,
+                            model == null ? "" : model,
+                            commandLine == null ? "" : commandLine,
+                            yoloMode,
+                            approvalsEnabled,
+                            System.currentTimeMillis());
+            invocations.add(invocation);
+            run.save();
+            return id;
         }
-        invocation.exitCode = exitCode;
-        invocation.completedAtMillis = System.currentTimeMillis();
-        run.save();
     }
 
-    public synchronized List<InvocationRecord> getInvocations() {
-        return Collections.unmodifiableList(new ArrayList<>(invocations));
-    }
-
-    public synchronized List<InvocationRecord> getInvocationsNewestFirst() {
-        List<InvocationRecord> copy = new ArrayList<>(invocations);
-        Collections.reverse(copy);
-        return Collections.unmodifiableList(copy);
-    }
-
-    public synchronized boolean hasInvocations() {
-        return !invocations.isEmpty();
-    }
-
-    public synchronized int getLatestInvocationId() {
-        InvocationRecord latest = latestInvocation();
-        return latest == null ? 0 : latest.id;
-    }
-
-    public synchronized String getAgentType() {
-        InvocationRecord latest = latestInvocation();
-        return latest == null ? "" : latest.agentType;
-    }
-
-    public synchronized String getPrompt() {
-        InvocationRecord latest = latestInvocation();
-        return latest == null || latest.prompt == null ? "" : latest.prompt;
-    }
-
-    public synchronized String getModel() {
-        InvocationRecord latest = latestInvocation();
-        if (latest == null) {
-            return "";
+    public void markCompleted(int invocationId, int exitCode) throws IOException {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            if (invocation == null) {
+                return;
+            }
+            invocation.exitCode = exitCode;
+            invocation.completedAtMillis = System.currentTimeMillis();
+            run.save();
         }
-        if (latest.model != null && !latest.model.isEmpty()) {
+    }
+
+    public List<InvocationRecord> getInvocations() {
+        synchronized (stateLock) {
+            return Collections.unmodifiableList(new ArrayList<>(invocations));
+        }
+    }
+
+    public List<InvocationRecord> getInvocationsNewestFirst() {
+        synchronized (stateLock) {
+            List<InvocationRecord> copy = new ArrayList<>(invocations);
+            Collections.reverse(copy);
+            return Collections.unmodifiableList(copy);
+        }
+    }
+
+    public boolean hasInvocations() {
+        synchronized (stateLock) {
+            return !invocations.isEmpty();
+        }
+    }
+
+    public int getLatestInvocationId() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest == null ? 0 : latest.id;
+        }
+    }
+
+    public String getAgentType() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest == null ? "" : latest.agentType;
+        }
+    }
+
+    public String getPrompt() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest == null || latest.prompt == null ? "" : latest.prompt;
+        }
+    }
+
+    public String getModel() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            if (latest == null) {
+                return "";
+            }
+            if (latest.model != null && !latest.model.isEmpty()) {
+                return latest.model;
+            }
+            try {
+                AiAgentStatsExtractor extractor = resolveStatsExtractor(latest.id);
+                String detected =
+                        AgentUsageStats.fromLogFile(getRawLogFile(latest.id), extractor)
+                                .getDetectedModel();
+                if (!detected.isEmpty()) {
+                    return detected;
+                }
+            } catch (IOException ignored) {
+            }
             return latest.model;
         }
-        try {
-            AiAgentStatsExtractor extractor = resolveStatsExtractor(latest.id);
-            String detected =
-                    AgentUsageStats.fromLogFile(getRawLogFile(latest.id), extractor)
-                            .getDetectedModel();
-            if (!detected.isEmpty()) {
-                return detected;
+    }
+
+    public String getCommandLine() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest == null ? "" : latest.commandLine;
+        }
+    }
+
+    public boolean isYoloMode() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest != null && latest.yoloMode;
+        }
+    }
+
+    public boolean isApprovalsEnabled() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest != null && latest.approvalsEnabled;
+        }
+    }
+
+    public String getStartedAt() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            if (latest == null || latest.startedAtMillis <= 0L) {
+                return "";
             }
-        } catch (IOException ignored) {
+            return new Date(latest.startedAtMillis).toString();
         }
-        return latest.model;
     }
 
-    public synchronized String getCommandLine() {
-        InvocationRecord latest = latestInvocation();
-        return latest == null ? "" : latest.commandLine;
-    }
-
-    public synchronized boolean isYoloMode() {
-        InvocationRecord latest = latestInvocation();
-        return latest != null && latest.yoloMode;
-    }
-
-    public synchronized boolean isApprovalsEnabled() {
-        InvocationRecord latest = latestInvocation();
-        return latest != null && latest.approvalsEnabled;
-    }
-
-    public synchronized String getStartedAt() {
-        InvocationRecord latest = latestInvocation();
-        if (latest == null || latest.startedAtMillis <= 0L) {
-            return "";
+    public String getCompletedAt() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            if (latest == null || latest.completedAtMillis <= 0L) {
+                return null;
+            }
+            return new Date(latest.completedAtMillis).toString();
         }
-        return new Date(latest.startedAtMillis).toString();
     }
 
-    public synchronized String getCompletedAt() {
-        InvocationRecord latest = latestInvocation();
-        if (latest == null || latest.completedAtMillis <= 0L) {
-            return null;
+    public Integer getExitCode() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest == null ? null : latest.exitCode;
         }
-        return new Date(latest.completedAtMillis).toString();
     }
 
-    public synchronized Integer getExitCode() {
-        InvocationRecord latest = latestInvocation();
-        return latest == null ? null : latest.exitCode;
-    }
-
-    public synchronized boolean isLive() {
-        InvocationRecord latest = latestInvocation();
-        return latest != null && run != null && run.isBuilding() && latest.exitCode == null;
+    public boolean isLive() {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest != null && run != null && run.isBuilding() && latest.exitCode == null;
+        }
     }
 
     public List<ExecutionRegistry.PendingApproval> getPendingApprovals() {
@@ -314,85 +349,107 @@ public class AiAgentRunAction implements Action, RunAction2 {
         return new File(run.getRootDir(), RAW_LOG_FILE_PREFIX + invocationId + RAW_LOG_FILE_SUFFIX);
     }
 
-    public synchronized boolean isInvocationLive(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation != null
-                && run != null
-                && run.isBuilding()
-                && invocation.exitCode == null
-                && invocation.id == getLatestInvocationId();
-    }
-
-    public synchronized Integer getInvocationExitCode(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation == null ? null : invocation.exitCode;
-    }
-
-    public synchronized boolean isLatestInvocation(int invocationId) {
-        InvocationRecord latest = latestInvocation();
-        return latest != null && latest.id == invocationId;
-    }
-
-    public synchronized String getInvocationModel(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        if (invocation == null) {
-            return "";
+    public boolean isInvocationLive(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation != null
+                    && run != null
+                    && run.isBuilding()
+                    && invocation.exitCode == null
+                    && invocation.id == getLatestInvocationId();
         }
-        if (invocation.model != null && !invocation.model.isEmpty()) {
+    }
+
+    public Integer getInvocationExitCode(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation == null ? null : invocation.exitCode;
+        }
+    }
+
+    public boolean isLatestInvocation(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord latest = latestInvocation();
+            return latest != null && latest.id == invocationId;
+        }
+    }
+
+    public String getInvocationModel(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            if (invocation == null) {
+                return "";
+            }
+            if (invocation.model != null && !invocation.model.isEmpty()) {
+                return invocation.model;
+            }
+            try {
+                AiAgentStatsExtractor extractor = resolveStatsExtractor(invocationId);
+                String detected =
+                        AgentUsageStats.fromLogFile(getRawLogFile(invocationId), extractor)
+                                .getDetectedModel();
+                if (!detected.isEmpty()) {
+                    return detected;
+                }
+            } catch (IOException ignored) {
+            }
             return invocation.model;
         }
-        try {
-            AiAgentStatsExtractor extractor = resolveStatsExtractor(invocationId);
-            String detected =
-                    AgentUsageStats.fromLogFile(getRawLogFile(invocationId), extractor)
-                            .getDetectedModel();
-            if (!detected.isEmpty()) {
-                return detected;
+    }
+
+    public String getInvocationPrompt(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation == null || invocation.prompt == null ? "" : invocation.prompt;
+        }
+    }
+
+    public String getInvocationAgentType(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation == null ? "" : invocation.agentType;
+        }
+    }
+
+    public String getInvocationCommandLine(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation == null ? "" : invocation.commandLine;
+        }
+    }
+
+    public String getInvocationStartedAt(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            if (invocation == null || invocation.startedAtMillis <= 0L) {
+                return "";
             }
-        } catch (IOException ignored) {
+            return new Date(invocation.startedAtMillis).toString();
         }
-        return invocation.model;
     }
 
-    public synchronized String getInvocationPrompt(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation == null || invocation.prompt == null ? "" : invocation.prompt;
-    }
-
-    public synchronized String getInvocationAgentType(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation == null ? "" : invocation.agentType;
-    }
-
-    public synchronized String getInvocationCommandLine(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation == null ? "" : invocation.commandLine;
-    }
-
-    public synchronized String getInvocationStartedAt(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        if (invocation == null || invocation.startedAtMillis <= 0L) {
-            return "";
+    public String getInvocationCompletedAt(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            if (invocation == null || invocation.completedAtMillis <= 0L) {
+                return "";
+            }
+            return new Date(invocation.completedAtMillis).toString();
         }
-        return new Date(invocation.startedAtMillis).toString();
     }
 
-    public synchronized String getInvocationCompletedAt(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        if (invocation == null || invocation.completedAtMillis <= 0L) {
-            return "";
+    public boolean getInvocationYoloMode(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation != null && invocation.yoloMode;
         }
-        return new Date(invocation.completedAtMillis).toString();
     }
 
-    public synchronized boolean getInvocationYoloMode(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation != null && invocation.yoloMode;
-    }
-
-    public synchronized boolean getInvocationApprovalsEnabled(int invocationId) {
-        InvocationRecord invocation = getInvocation(invocationId);
-        return invocation != null && invocation.approvalsEnabled;
+    public boolean getInvocationApprovalsEnabled(int invocationId) {
+        synchronized (stateLock) {
+            InvocationRecord invocation = getInvocation(invocationId);
+            return invocation != null && invocation.approvalsEnabled;
+        }
     }
 
     public int getSelectedInvocationId() {
@@ -575,17 +632,27 @@ public class AiAgentRunAction implements Action, RunAction2 {
         }
     }
 
-    private synchronized InvocationRecord latestInvocation() {
-        return invocations.isEmpty() ? null : invocations.get(invocations.size() - 1);
+    private InvocationRecord latestInvocation() {
+        synchronized (stateLock) {
+            return invocations.isEmpty() ? null : invocations.get(invocations.size() - 1);
+        }
     }
 
-    private synchronized InvocationRecord getInvocation(int invocationId) {
-        for (InvocationRecord invocation : invocations) {
-            if (invocation.id == invocationId) {
-                return invocation;
+    private InvocationRecord getInvocation(int invocationId) {
+        synchronized (stateLock) {
+            for (InvocationRecord invocation : invocations) {
+                if (invocation.id == invocationId) {
+                    return invocation;
+                }
             }
+            return null;
         }
-        return null;
+    }
+
+    private void initializeTransientState() {
+        if (stateLock == null) {
+            stateLock = new Object();
+        }
     }
 
     private int resolveRequestedInvocationId() {
