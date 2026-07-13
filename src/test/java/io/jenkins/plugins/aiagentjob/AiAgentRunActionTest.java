@@ -61,6 +61,34 @@ class AiAgentRunActionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void actionState_remainsUsableAfterJenkinsReload(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "test-reload",
+                        b -> b.setCommandOverride("echo '{\"type\":\"system\"}'"));
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        int buildNumber = build.getNumber();
+
+        jenkins.jenkins.reload();
+
+        FreeStyleProject reloadedProject =
+                jenkins.jenkins.getItemByFullName("test-reload", FreeStyleProject.class);
+        assertNotNull(reloadedProject);
+        FreeStyleBuild reloadedBuild = reloadedProject.getBuildByNumber(buildNumber);
+        assertNotNull(reloadedBuild);
+        AiAgentRunAction action = reloadedBuild.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+
+        int invocationId =
+                action.markStarted("Codex", "continue", "gpt-5.5", "codex exec", false, false);
+
+        assertEquals(2, invocationId);
+        assertEquals(2, action.getInvocations().size());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void actionProperties_afterCompletion(JenkinsRule jenkins) throws Exception {
         FreeStyleProject project =
                 newProject(
