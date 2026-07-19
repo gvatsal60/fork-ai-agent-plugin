@@ -47,14 +47,20 @@ public final class ExecutionRegistry {
         private final Map<String, PendingApproval> pendingApprovals = new ConcurrentHashMap<>();
         private final Map<String, CompletableFuture<ApprovalDecision>> decisions =
                 new ConcurrentHashMap<>();
+        private String cancellationReason;
 
-        PendingApproval createPendingApproval(
+        synchronized PendingApproval createPendingApproval(
                 String toolCallId, String toolName, String inputSummary) {
             String id = UUID.randomUUID().toString();
             PendingApproval pending =
                     new PendingApproval(id, toolCallId, toolName, inputSummary, Instant.now());
-            decisions.put(id, new CompletableFuture<>());
-            pendingApprovals.put(id, pending);
+            CompletableFuture<ApprovalDecision> decision = new CompletableFuture<>();
+            decisions.put(id, decision);
+            if (cancellationReason == null) {
+                pendingApprovals.put(id, pending);
+            } else {
+                decision.complete(ApprovalDecision.denied(cancellationReason));
+            }
             return pending;
         }
 
@@ -113,8 +119,9 @@ public final class ExecutionRegistry {
             return completed;
         }
 
-        void cancelPendingApprovals(String reason) {
+        synchronized void cancelPendingApprovals(String reason) {
             ApprovalDecision cancelled = ApprovalDecision.denied(reason);
+            cancellationReason = cancelled.getReason();
             for (Map.Entry<String, CompletableFuture<ApprovalDecision>> entry :
                     decisions.entrySet()) {
                 entry.getValue().complete(cancelled);

@@ -39,5 +39,8 @@ Thumbs.db
 # Build artifacts
 build-*.log
 
+# Node.js
+node_modules/
+
 # Local agent instructions (not committed)
 AGENTS.local.md

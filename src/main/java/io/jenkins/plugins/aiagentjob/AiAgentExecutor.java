@@ -329,6 +329,7 @@ final class AiAgentExecutor {
                         new NonClosingSynchronizedOutputStream(outputHandler),
                         false);
         stderrThread.start();
+        Thread processMonitor = startAcpProcessMonitor(proc, liveExecution);
         try {
             AcpClientSession session =
                     new AcpClientSession(
@@ -348,9 +349,32 @@ final class AiAgentExecutor {
                     proc.kill();
                 }
                 proc.joinWithTimeout(10, TimeUnit.SECONDS, listener);
+                processMonitor.join(TimeUnit.SECONDS.toMillis(10));
                 stderrThread.join(TimeUnit.SECONDS.toMillis(10));
             }
         }
+    }
+
+    private static Thread startAcpProcessMonitor(
+            Proc proc, ExecutionRegistry.LiveExecution liveExecution) {
+        Thread thread =
+                new Thread(
+                        () -> {
+                            String reason = "agent process exited while waiting for approval";
+                            try {
+                                proc.join();
+                            } catch (IOException e) {
+                                reason = "agent process monitor failed: " + e.getMessage();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                reason = "agent process monitor was interrupted";
+                            }
+                            liveExecution.cancelPendingApprovals(reason);
+                        },
+                        "ai-agent-acp-process-monitor");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
     }
 
     private static String buildCombinedScript(
@@ -459,7 +483,7 @@ final class AiAgentExecutor {
     }
 
     static List<String> buildWindowsCommand(List<String> command) {
-        return new ArgumentListBuilder().add(command).toWindowsCommand().toList();
+        return new ArgumentListBuilder().add(command).toWindowsCommand(true).toList();
     }
 
     private static FilePath resolveRunDirectory(FilePath workspace, String workDirValue) {
@@ -705,7 +729,7 @@ final class AiAgentExecutor {
             rawWriter.flush();
         }
 
-        private String maskSensitiveValues(String value) {
+        String maskSensitiveValues(String value) {
             if (sensitivePattern.pattern().isEmpty()) {
                 return value;
             }
@@ -737,7 +761,8 @@ final class AiAgentExecutor {
         }
 
         synchronized void writeStatus(String message) throws IOException {
-            logger.write(("[ai-agent] " + message + "\n").getBytes(StandardCharsets.UTF_8));
+            String safeMessage = maskSensitiveValues(message);
+            logger.write(("[ai-agent] " + safeMessage + "\n").getBytes(StandardCharsets.UTF_8));
             logger.flush();
         }
 

@@ -388,6 +388,29 @@ class AiAgentLogParserTest {
         assertTrue(assistant.getContent().contains("AI Agent"));
     }
 
+    @Test
+    void openCodeStreaming_mergesThoughtChunks() throws IOException {
+        File temp = File.createTempFile("opencode-thought-deltas-", ".jsonl");
+        temp.deleteOnExit();
+        Files.write(
+                temp.toPath(),
+                List.of(
+                        "{\"method\":\"session/update\",\"params\":{\"update\":{"
+                                + "\"sessionUpdate\":\"agent_thought_chunk\",\"content\":{"
+                                + "\"type\":\"text\",\"text\":\"Inspect-\"}}}}",
+                        "{\"method\":\"session/update\",\"params\":{\"update\":{"
+                                + "\"sessionUpdate\":\"agent_thought_chunk\",\"content\":{"
+                                + "\"type\":\"text\",\"text\":\"tests\"}}}}"));
+
+        List<AiAgentLogParser.EventView> events =
+                AiAgentLogParser.parse(temp, OpenCodeLogFormat.INSTANCE);
+
+        assertEquals(1, events.size());
+        assertEquals("thinking", events.get(0).getCategory());
+        assertEquals("Inspect-tests", events.get(0).getContent());
+        assertFalse(events.get(0).isDelta(), "Merged stream event should no longer be a delta");
+    }
+
     // ======================== Error Handling Tests ========================
 
     @Test

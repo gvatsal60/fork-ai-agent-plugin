@@ -110,6 +110,21 @@ class ExecutionRegistryTest {
     }
 
     @Test
+    void cancellationBeforeApprovalCreation_deniesNewApproval() throws Exception {
+        ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
+        live.cancelPendingApprovals("agent process exited while waiting for approval");
+        ExecutionRegistry.PendingApproval pending =
+                live.createPendingApproval("tc-1", "bash", "ls");
+
+        ExecutionRegistry.ApprovalDecision decision =
+                live.awaitDecision(pending, Duration.ofSeconds(1));
+
+        assertFalse(decision.isApproved());
+        assertTrue(decision.getReason().contains("agent process exited"));
+        assertTrue(live.getPendingApprovals().isEmpty());
+    }
+
+    @Test
     void approvalDecision_factoryMethods() {
         ExecutionRegistry.ApprovalDecision approved = ExecutionRegistry.ApprovalDecision.approved();
         assertTrue(approved.isApproved());

@@ -1,0 +1,10 @@
+{
+  "name": "ai-agent-plugin-browser-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --check src/main/resources/io/jenkins/plugins/aiagentjob/AiAgentRunAction/summary_resources.js && node --test src/test/js/summary_resources.test.js"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.13"
+  }
+}

@@ -207,6 +207,10 @@ final class AcpClientSession {
             summary = LogFormatUtils.firstNonEmpty(toolCall, "title");
         }
 
+        toolCallId = outputHandler.maskSensitiveValues(toolCallId);
+        toolName = outputHandler.maskSensitiveValues(toolName);
+        summary = outputHandler.maskSensitiveValues(summary);
+
         ExecutionRegistry.PendingApproval pending =
                 liveExecution.createPendingApproval(toolCallId, toolName, summary);
         outputHandler.writeStatus(
@@ -218,6 +222,10 @@ final class AcpClientSession {
 
         ExecutionRegistry.ApprovalDecision decision =
                 liveExecution.awaitDecision(pending, approvalTimeout);
+        if (!proc.isAlive()) {
+            outputHandler.writeStatus("Approval denied: " + decision.getReason());
+            throw new ApprovalDeniedException();
+        }
         JSONArray options = params.optJSONArray("options");
         String optionId =
                 findPermissionOption(

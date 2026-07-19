@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.cloudbees.plugins.credentials.CredentialsProvider;
+import com.cloudbees.plugins.credentials.CredentialsScope;
+import com.cloudbees.plugins.credentials.domains.Domain;
+
 import hudson.FilePath;
 import hudson.model.Executor;
 import hudson.model.FreeStyleBuild;
@@ -18,6 +22,7 @@ import hudson.model.TaskListener;
 import hudson.model.queue.QueueTaskFuture;
 import hudson.slaves.DumbSlave;
 import hudson.slaves.WorkspaceList;
+import hudson.util.Secret;
 
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
@@ -26,6 +31,7 @@ import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
+import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -458,12 +464,18 @@ class AiAgentBuildExecutionTest {
     void windowsCommandUsesCmdWithoutFlatteningLaunchMode() {
         List<String> command =
                 AiAgentExecutor.buildWindowsCommand(
-                        List.of("codex", "exec", "prompt with spaces", "100% literal"));
+                        List.of(
+                                "codex",
+                                "exec",
+                                "prompt with spaces",
+                                "%OPENAI_API_KEY%",
+                                "100% literal"));
 
         assertEquals("cmd.exe", command.get(0));
         assertEquals("/C", command.get(1));
         String commandLine = String.join(" ", command.subList(2, command.size()));
         assertTrue(commandLine.contains("prompt with spaces"));
+        assertFalse(commandLine.contains("%OPENAI_API_KEY%"));
         assertTrue(commandLine.contains("100% literal"));
     }
 
@@ -598,6 +610,17 @@ class AiAgentBuildExecutionTest {
     @EnabledOnOs(OS.LINUX)
     void openCodeAcp_waitsForJenkinsApprovalBeforeToolExecution(JenkinsRule jenkins)
             throws Exception {
+        String approvalSecret = "approval-secret-not-for-progressive-events";
+        StringCredentialsImpl credential =
+                new StringCredentialsImpl(
+                        CredentialsScope.GLOBAL,
+                        "approval-secret",
+                        "Approval secret",
+                        Secret.fromString(approvalSecret));
+        CredentialsProvider.lookupStores(jenkins.getInstance())
+                .iterator()
+                .next()
+                .addCredentials(Domain.global(), credential);
         File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-bin");
 
         String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
@@ -610,6 +633,8 @@ class AiAgentBuildExecutionTest {
                             b.setPrompt("create approved.txt");
                             b.setRequireApprovals(true);
                             b.setApprovalTimeoutSeconds(30);
+                            b.setApiCredentialsId("approval-secret");
+                            b.setApiEnvVarName("FAKE_ACP_SECRET_INPUT");
                             b.setModel("test/provider-model");
                             b.setExtraArgs("--variant high --format json --pure");
                             b.setSetupScript("cd \"${WORKSPACE}\"");
@@ -624,6 +649,8 @@ class AiAgentBuildExecutionTest {
         FreeStyleBuild runningBuild = future.waitForStart();
         ExecutionRegistry.PendingApproval pending =
                 waitForPendingApproval(jenkins, runningBuild, future);
+        assertEquals("****", pending.getInputSummary());
+        assertFalse(pending.getInputSummary().contains(approvalSecret));
         AiAgentRunAction action = runningBuild.getAction(AiAgentRunAction.class);
         assertNotNull(action);
         ExecutionRegistry.LiveExecution liveExecution =
@@ -656,8 +683,42 @@ class AiAgentBuildExecutionTest {
         assertFalse(rawLog.contains("\"configOptions\""));
         assertFalse(rawLog.contains("private-test-command"));
         assertFalse(rawLog.contains("private-test-content"));
+        assertFalse(rawLog.contains(approvalSecret));
+        assertFalse(jenkins.getLog(build).contains(approvalSecret));
         assertTrue(action.getEvents().stream().anyMatch(e -> "tool_call".equals(e.getCategory())));
         assertTrue(action.getEvents().stream().anyMatch(e -> "assistant".equals(e.getCategory())));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void openCodeAcp_processExitCancelsPendingApproval(JenkinsRule jenkins) throws Exception {
+        File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-exit-bin");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-opencode-acp-exit",
+                        b -> {
+                            b.setAgent(new OpenCodeAgentHandler());
+                            b.setPrompt("request then exit");
+                            b.setRequireApprovals(true);
+                            b.setApprovalTimeoutSeconds(30);
+                            b.setEnvironmentVariables(
+                                    "PATH=" + path + "\nFAKE_ACP_EXIT_AFTER_PERMISSION=1");
+                            b.setFailOnAgentError(true);
+                        });
+
+        long started = System.nanoTime();
+        FreeStyleBuild build = project.scheduleBuild2(0).get(10, TimeUnit.SECONDS);
+
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        assertTrue(
+                System.nanoTime() - started < TimeUnit.SECONDS.toNanos(10),
+                "Agent exit should not wait for approval timeout");
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        assertTrue(action.getPendingApprovals().isEmpty());
+        assertTrue(jenkins.getLog(build).contains("agent process exited"));
     }
 
     private static ExecutionRegistry.PendingApproval waitForPendingApproval(

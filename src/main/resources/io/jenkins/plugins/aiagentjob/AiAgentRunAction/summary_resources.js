@@ -24,11 +24,6 @@
     }
   }
 
-  if (typeof module === 'object' && module.exports && typeof document === 'undefined') {
-    module.exports = { buildApprovalUrl: buildApprovalUrl, isSafeUrl: isSafeUrl };
-    return;
-  }
-
   function esc(text) {
     const div = document.createElement('div');
     div.appendChild(document.createTextNode(text || ''));
@@ -165,7 +160,9 @@
         }
       }
     }
-    return template.innerHTML;
+    const output = document.createElement('div');
+    output.appendChild(template.content.cloneNode(true));
+    return output.innerHTML;
   }
 
   function mdToHtml(text) {
@@ -533,6 +530,17 @@
         });
       }
     }
+  }
+
+  if (typeof module === 'object' && module.exports) {
+    module.exports = {
+      appendDelta: appendDelta,
+      buildApprovalUrl: buildApprovalUrl,
+      isSafeUrl: isSafeUrl,
+      renderEvent: renderEvent,
+      sanitizeHtml: sanitizeHtml
+    };
+    return;
   }
 
   if (document.readyState === 'loading') {

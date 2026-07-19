@@ -84,7 +84,7 @@ public final class OpenCodeLogFormat implements AiAgentLogFormat {
                     lineNumber, "user", "User", text, rawDetails);
         }
         if ("agent_thought_chunk".equals(updateType)) {
-            return AiAgentLogParser.ParsedLine.thinking(lineNumber, text, rawDetails);
+            return AiAgentLogParser.ParsedLine.thinking(lineNumber, text, rawDetails, true);
         }
         if ("tool_call".equals(updateType)) {
             return classifyAcpToolCall(lineNumber, update, rawDetails);

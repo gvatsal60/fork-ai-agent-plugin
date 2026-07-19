@@ -27,11 +27,20 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: maven
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install browser JavaScript test dependencies
+        run: npm ci
+
       - name: Build and verify
         run: mvn -B clean verify
 
       - name: Test browser JavaScript
-        run: node --test src/test/js/summary_resources.test.js
+        run: npm test
 
       - name: Upload coverage report
         if: matrix.java == 21
