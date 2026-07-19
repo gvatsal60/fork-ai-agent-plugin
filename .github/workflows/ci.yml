@@ -30,6 +30,9 @@ jobs:
       - name: Build and verify
         run: mvn -B clean verify
 
+      - name: Test browser JavaScript
+        run: node --test src/test/js/summary_resources.test.js
+
       - name: Upload coverage report
         if: matrix.java == 21
         uses: actions/upload-artifact@v7

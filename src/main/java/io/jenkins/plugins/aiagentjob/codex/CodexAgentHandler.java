@@ -105,9 +105,14 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
         FilePath tempDir = AiAgentTempFiles.tempRoot(workspace);
         FilePath homeDir = tempDir.child("ai-agent-codex-home-" + System.nanoTime());
         FilePath codexDir = homeDir.child(".codex");
+        FilePath configFile = codexDir.child("config.toml");
         try {
+            homeDir.mkdirs();
+            homeDir.chmod(0700);
             codexDir.mkdirs();
-            codexDir.child("config.toml").write(Util.fixNull(customConfigToml), "UTF-8");
+            codexDir.chmod(0700);
+            configFile.write(Util.fixNull(customConfigToml), "UTF-8");
+            configFile.chmod(0600);
         } catch (IOException | InterruptedException e) {
             try {
                 homeDir.deleteRecursive();

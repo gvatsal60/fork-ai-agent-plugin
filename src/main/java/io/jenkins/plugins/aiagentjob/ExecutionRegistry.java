@@ -58,7 +58,8 @@ public final class ExecutionRegistry {
             return pending;
         }
 
-        ApprovalDecision awaitDecision(PendingApproval pendingApproval, Duration timeout) {
+        ApprovalDecision awaitDecision(PendingApproval pendingApproval, Duration timeout)
+                throws InterruptedException {
             CompletableFuture<ApprovalDecision> future = decisions.get(pendingApproval.getId());
             if (future == null) {
                 return ApprovalDecision.denied("approval request disappeared");
@@ -66,11 +67,8 @@ public final class ExecutionRegistry {
             try {
                 return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                ApprovalDecision interrupted =
-                        ApprovalDecision.denied("interrupted while waiting for approval");
-                future.complete(interrupted);
-                return future.getNow(interrupted);
+                future.complete(ApprovalDecision.denied("interrupted while waiting for approval"));
+                throw e;
             } catch (ExecutionException e) {
                 return ApprovalDecision.denied("approval failed: " + e.getMessage());
             } catch (TimeoutException e) {

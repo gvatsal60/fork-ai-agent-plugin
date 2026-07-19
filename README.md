@@ -62,7 +62,7 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
    - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`).
    - **YOLO mode** — skip confirmation prompts in the agent.
    - **Approvals** — require human approval for tool calls.
-   - **Setup script** — shell commands to run before the agent (install tools, source dotfiles, export secrets).
+   - **Setup script** — shell commands to run before the agent (install tools, source dotfiles, configure runtime variables).
    - **Custom Codex config.toml** — optional, shown only for Codex runs to override settings/MCP per job.
    - **Additional Codex args** — optional, shown only for Codex runs to pass global flags like `--search` or exec flags like `--ephemeral`.
    - **Environment variables** — inject additional env vars (`KEY=VALUE`, one per line).
@@ -84,11 +84,11 @@ aiAgent(
 )
 ```
 
-Gemini with manual tool-call approvals:
+OpenCode with manual tool-call approvals:
 
 ```groovy
 aiAgent(
-  agent: geminiCli(),
+  agent: openCode(),
   prompt: 'Refactor the parser and add tests',
   requireApprovals: true,
   approvalTimeoutSeconds: 300
@@ -106,8 +106,7 @@ aiAgent(
     additionalExecArgs: '--ephemeral --color never'
   ),
   prompt: 'Summarize this project',
-  reasoningEffort: 'xhigh',
-  approvalTimeoutSeconds: 60
+  reasoningEffort: 'xhigh'
 )
 ```
 
@@ -135,7 +134,7 @@ The plugin injects these variables into every build:
 The **Setup script** field accepts shell commands that run before the agent process starts on
 Unix agents.
 Use it to prepare the build environment — install dependencies, source dotfiles, configure PATH,
-or export secrets that the agent needs at runtime.
+or map Jenkins-bound credentials into variables that the agent needs at runtime.
 
 ```bash
 # Example: add local binaries to PATH, source nvm, install a CLI tool
@@ -147,9 +146,10 @@ npm install -g @anthropic-ai/claude-code
 
 The setup script and agent command run in the **same shell session**, so any `export`ed
 variables, PATH changes, or sourced dotfiles are available to the agent. Supports shebang
-lines (e.g. `#!/bin/zsh`) just like the Jenkins Shell build step — if no shebang is present,
-`/bin/sh -xe` is used. If the script exits with a non-zero code the build fails immediately
-without launching the agent. On Windows nodes, use **Command override** instead.
+lines (e.g. `#!/bin/zsh`) — if no shebang is present, `/bin/sh -e` is used. If the script exits
+with a non-zero code the build fails immediately without launching the agent. Shell tracing is
+disabled for setup and generated agent commands so expanded values, prompts, and arguments are not
+written to the build log. On Windows nodes, use **Command override** instead.
 
 ### Command Override
 
@@ -194,11 +194,9 @@ Prompt and command-line values are not retained in build action metadata because
 
 ### Approval Gates
 
-When approvals are enabled and YOLO mode is off, tool calls detected in the agent's output trigger a blocking approval request. The build pauses until a user approves or denies from the build page. Denied or timed-out requests fail the build.
+Manual approvals are currently supported only for OpenCode. Approval builds use its bidirectional Agent Client Protocol server and pause before tool execution until a user approves or denies from the build page. Denied or timed-out requests fail the build. The installed OpenCode CLI must support `opencode acp`; builds without manual approvals continue to use `opencode run`.
 
-OpenCode approval builds use its bidirectional Agent Client Protocol server. The installed OpenCode CLI must support `opencode acp`. OpenCode builds without manual approvals continue to use `opencode run`.
-
-Codex CLI does not expose a non-interactive approval channel, so Codex jobs reject manual approvals instead of silently running with `--ask-for-approval never`.
+Claude Code, Codex CLI, Cursor Agent, Gemini CLI, and command overrides do not expose a supported bidirectional approval channel to this plugin. Jobs reject those combinations before launching instead of showing an approval that cannot affect tool execution.
 
 ### Usage Statistics
 

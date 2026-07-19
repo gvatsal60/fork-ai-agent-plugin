@@ -1,4 +1,34 @@
 (function () {
+  function buildApprovalUrl(url, id, reason) {
+    const params = new URLSearchParams();
+    params.append('id', id);
+    if (reason != null && reason !== '') {
+      params.append('reason', reason);
+    }
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + params.toString();
+  }
+
+  function isSafeUrl(value, allowMailto, baseUrl) {
+    if (!value) {
+      return false;
+    }
+    try {
+      const base = baseUrl
+        || (typeof window !== 'undefined' ? window.location.href : 'https://localhost/');
+      const parsed = new URL(value, base);
+      return parsed.protocol === 'http:'
+        || parsed.protocol === 'https:'
+        || (allowMailto && parsed.protocol === 'mailto:');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  if (typeof module === 'object' && module.exports && typeof document === 'undefined') {
+    module.exports = { buildApprovalUrl: buildApprovalUrl, isSafeUrl: isSafeUrl };
+    return;
+  }
+
   function esc(text) {
     const div = document.createElement('div');
     div.appendChild(document.createTextNode(text || ''));
@@ -86,20 +116,6 @@
       out = out.substring(0, out.length - 5);
     }
     return out;
-  }
-
-  function isSafeUrl(value, allowMailto) {
-    if (!value) {
-      return false;
-    }
-    try {
-      const parsed = new URL(value, window.location.href);
-      return parsed.protocol === 'http:'
-        || parsed.protocol === 'https:'
-        || (allowMailto && parsed.protocol === 'mailto:');
-    } catch (e) {
-      return false;
-    }
   }
 
   function sanitizeHtml(html) {
@@ -315,18 +331,12 @@
     const buttons = card.querySelectorAll('button');
     buttons.forEach(function(b) { b.disabled = true; });
 
-    const params = new URLSearchParams();
-    params.append('id', id);
-    if (reason != null && reason !== '') {
-      params.append('reason', reason);
-    }
-
     const headers = { 'Accept': 'application/json' };
     if (crumbRequestField && crumbValue) {
       headers[crumbRequestField] = crumbValue;
     }
 
-    fetch(url + '?' + params.toString(), {
+    fetch(buildApprovalUrl(url, id, reason), {
       method: 'POST',
       credentials: 'same-origin',
       headers: headers

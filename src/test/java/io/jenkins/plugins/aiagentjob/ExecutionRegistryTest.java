@@ -36,7 +36,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void approve_resolvesDecision() {
+    void approve_resolvesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "ls");
@@ -59,7 +59,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void approveBeforeAwait_resolvesDecision() {
+    void approveBeforeAwait_resolvesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "ls");
@@ -72,7 +72,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void deny_resolvesDecision() {
+    void deny_resolvesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "rm -rf /");
@@ -95,7 +95,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void timeout_deniesDecision() {
+    void timeout_deniesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "ls");
@@ -133,7 +133,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void cancelPendingApprovals_deniesWaitersAndClearsCards() {
+    void cancelPendingApprovals_deniesWaitersAndClearsCards() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval first = live.createPendingApproval("tc-1", "bash", "ls");
         ExecutionRegistry.PendingApproval second =

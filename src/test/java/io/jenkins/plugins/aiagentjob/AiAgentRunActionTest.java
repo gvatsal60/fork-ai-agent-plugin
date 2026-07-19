@@ -16,6 +16,7 @@ import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 import org.htmlunit.html.HtmlPage;
+import org.htmlunit.html.HtmlScript;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -25,6 +26,7 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import java.io.File;
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
@@ -348,6 +350,33 @@ class AiAgentRunActionTest {
         assertTrue(text.contains("AI Agent Conversation #1"));
         assertFalse(text.contains("Explain this repository in detail"));
         assertTrue(text.contains("Raw Log"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void conversationPage_loadsMarkedBundleFromJenkinsContextPath(JenkinsRule jenkins)
+            throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "test-conversation-markdown-sanitizer",
+                        b ->
+                                b.setCommandOverride(
+                                        "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"[unsafe](javascript:alert(1))\"}]}}'"));
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+
+        JenkinsRule.WebClient wc = jenkins.createWebClient();
+        wc.getOptions().setJavaScriptEnabled(false);
+        HtmlPage page = wc.goTo(build.getUrl() + "ai-agent/conversation?invocation=1");
+
+        HtmlScript markedScript =
+                page.getFirstByXPath("//script[contains(@src, '/js/bundles/marked.umd.js')]");
+        assertNotNull(markedScript, "Conversation page should include the Marked bundle");
+        URL markedUrl = page.getFullyQualifiedUrl(markedScript.getSrcAttribute());
+        assertTrue(
+                markedUrl.getPath().startsWith(jenkins.getURL().getPath()),
+                "Marked bundle URL should preserve the Jenkins context path");
+        assertEquals(200, wc.getPage(markedUrl).getWebResponse().getStatusCode());
     }
 
     private String buildCatScript(String fixtureName) throws Exception {

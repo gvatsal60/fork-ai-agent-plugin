@@ -165,6 +165,47 @@ class AiAgentCredentialInjectionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void masksJsonEscapedCredentialValues(JenkinsRule jenkins) throws Exception {
+        String secret = "double\"quote\\path";
+        String jsonEscapedSecret = "double\\\"quote\\\\path";
+        StringCredentialsImpl cred =
+                new StringCredentialsImpl(
+                        CredentialsScope.GLOBAL,
+                        "json-escaped-key",
+                        "JSON escaped key",
+                        Secret.fromString(secret));
+        CredentialsProvider.lookupStores(jenkins.getInstance())
+                .iterator()
+                .next()
+                .addCredentials(Domain.global(), cred);
+
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "json-escaped-credential-test",
+                        b -> {
+                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setApiCredentialsId("json-escaped-key");
+                            b.setCommandOverride(
+                                    "printf '%s\\n' '{\"type\":\"system\",\"message\":\"double\\\"quote\\\\path\"}'");
+                        });
+
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        String rawLog = Files.readString(action.getRawLogFile().toPath(), StandardCharsets.UTF_8);
+        String buildLog = build.getLog();
+
+        for (String secretVariant : new String[] {secret, jsonEscapedSecret}) {
+            assertFalse(rawLog.contains(secretVariant), "Raw log leaked credential variant");
+            assertFalse(buildLog.contains(secretVariant), "Build log leaked credential variant");
+        }
+        assertTrue(rawLog.contains("\"message\":\"****\""));
+        assertTrue(buildLog.contains("\"message\":\"****\""));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void warnsWhenCredentialNotFound(JenkinsRule jenkins) throws Exception {
         FreeStyleProject project =
                 newProject(

@@ -2,12 +2,14 @@
 <j:jelly xmlns:j="jelly:core"
          xmlns:st="jelly:stapler"
          xmlns:l="/lib/layout">
-  <script src="${resURL}/plugin/ai-agent/js/bundles/marked.umd.js"></script>
-  <st:adjunct includes="io.jenkins.plugins.aiagentjob.AiAgentRunAction.summary_resources" />
-
   <j:set var="selectedId" value="${it.selectedInvocationId}" />
 
   <l:layout permission="${it.run.parent.READ}" title="AI Agent Conversation">
+    <l:header>
+      <script src="${resURL}/plugin/ai-agent/js/bundles/marked.umd.js"></script>
+      <st:adjunct includes="io.jenkins.plugins.aiagentjob.AiAgentRunAction.summary_resources" />
+    </l:header>
+
     <st:include page="sidepanel.jelly" it="${it.run}"/>
     <l:main-panel>
       <l:app-bar title="AI Agent Conversation" subtitle="#${selectedId}">

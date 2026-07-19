@@ -23,6 +23,7 @@ import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeStatsExtractor;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
+import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.junit.jupiter.api.Test;
@@ -272,6 +273,9 @@ class AiAgentBuildExecutionTest {
                                     "cfg=\"$CODEX_HOME/config.toml\"; "
                                             + "if test -f \"$cfg\"; then echo CODEX_CONFIG_FOUND; sed -n '1,200p' \"$cfg\"; "
                                             + "else echo CODEX_CONFIG_MISSING home=$HOME codex_home=$CODEX_HOME; fi; "
+                                            + "echo CODEX_HOME_MODE=$(stat -c %a \"$HOME\"); "
+                                            + "echo CODEX_DIR_MODE=$(stat -c %a \"$CODEX_HOME\"); "
+                                            + "echo CODEX_CONFIG_MODE=$(stat -c %a \"$cfg\"); "
                                             + "echo CODEX_HOME=$CODEX_HOME; "
                                             + "echo '{\"type\":\"assistant\",\"message\":\"done\"}'");
                             b.setFailOnAgentError(true);
@@ -292,25 +296,28 @@ class AiAgentBuildExecutionTest {
         assertFalse(
                 log.contains("CODEX_HOME=/tmp/shared-codex-home"),
                 "Job-scoped config should override inherited CODEX_HOME");
+        assertTrue(log.contains("CODEX_HOME_MODE=700"), "Codex home should be owner-only");
+        assertTrue(
+                log.contains("CODEX_DIR_MODE=700"), "Codex config directory should be owner-only");
+        assertTrue(log.contains("CODEX_CONFIG_MODE=600"), "Codex config should be owner-only");
     }
 
     @Test
     @EnabledOnOs(OS.LINUX)
     void failsWhenApprovalTimesOut(JenkinsRule jenkins) throws Exception {
+        File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-timeout-bin");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
         FreeStyleProject project =
                 newProject(
                         jenkins,
                         "ai-build-approval-timeout",
                         b -> {
-                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setAgent(new OpenCodeAgentHandler());
                             b.setPrompt("needs approval");
                             b.setRequireApprovals(true);
                             b.setApprovalTimeoutSeconds(1);
                             b.setFailOnAgentError(true);
-                            b.setCommandOverride(
-                                    "echo '{\"type\":\"tool_call\",\"tool_name\":\"bash\",\"tool_call_id\":\"call-1\",\"text\":\"ls\"}'; "
-                                            + "sleep 2; "
-                                            + "echo '{\"type\":\"assistant\",\"message\":\"done\"}'");
+                            b.setEnvironmentVariables("PATH=" + path);
                         });
 
         QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
@@ -320,23 +327,25 @@ class AiAgentBuildExecutionTest {
 
         AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
         assertNotNull(action);
-        assertTrue(action.getEvents().stream().anyMatch(e -> "tool_call".equals(e.getCategory())));
+        assertTrue(jenkins.getLog(build).contains("approval timed out after 1s"));
+        assertTrue(action.getPendingApprovals().isEmpty());
     }
 
     @Test
     @EnabledOnOs(OS.LINUX)
     void abortWhileApprovalIsPendingCompletesPromptly(JenkinsRule jenkins) throws Exception {
+        File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-abort-bin");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
         FreeStyleProject project =
                 newProject(
                         jenkins,
                         "ai-build-abort-approval",
                         b -> {
-                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setAgent(new OpenCodeAgentHandler());
                             b.setPrompt("needs approval");
                             b.setRequireApprovals(true);
                             b.setApprovalTimeoutSeconds(60);
-                            b.setCommandOverride(
-                                    "echo '{\"type\":\"tool_call\",\"tool_name\":\"bash\",\"tool_call_id\":\"call-1\",\"text\":\"ls\"}'; sleep 60");
+                            b.setEnvironmentVariables("PATH=" + path);
                         });
 
         QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
@@ -357,6 +366,70 @@ class AiAgentBuildExecutionTest {
         assertTrue(
                 build.getAction(AiAgentRunAction.class).getPendingApprovals().isEmpty(),
                 "Aborting should remove pending approval cards");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void abortWhileAcpWaitsForAgentOutputCompletesPromptly(JenkinsRule jenkins) throws Exception {
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "fake-opencode-blocked-output-bin",
+                        "opencode",
+                        """
+                        #!/bin/sh
+                        set -eu
+                        test "${1:-}" = "acp"
+                        IFS= read -r request
+                        printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{},"authMethods":[]}}'
+                        IFS= read -r request
+                        printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1","configOptions":[]}}'
+                        IFS= read -r request
+                        touch acp-prompt-started
+                        sleep 5
+                        printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+                        """);
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-abort-acp-output",
+                        b -> {
+                            b.setAgent(new OpenCodeAgentHandler());
+                            b.setPrompt("wait for output");
+                            b.setRequireApprovals(true);
+                            b.setEnvironmentVariables("PATH=" + path);
+                        });
+        DumbSlave agent = jenkins.createOnlineSlave();
+        project.setAssignedNode(agent);
+
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild runningBuild = future.waitForStart();
+        FilePath workspace = null;
+        long workspaceDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (workspace == null && System.nanoTime() < workspaceDeadline) {
+            workspace = runningBuild.getWorkspace();
+            Thread.sleep(50);
+        }
+        assertNotNull(workspace);
+        long markerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!workspace.child("acp-prompt-started").exists()
+                && System.nanoTime() < markerDeadline) {
+            Thread.sleep(50);
+        }
+        assertTrue(workspace.child("acp-prompt-started").exists());
+
+        Executor executor = runningBuild.getExecutor();
+        assertNotNull(executor);
+        long started = System.nanoTime();
+        executor.interrupt(Result.ABORTED);
+
+        FreeStyleBuild build = future.get(10, TimeUnit.SECONDS);
+        assertEquals(Result.ABORTED, build.getResult());
+        assertTrue(
+                System.nanoTime() - started < TimeUnit.SECONDS.toNanos(3),
+                "Aborting should terminate an ACP process blocked on output");
     }
 
     @Test
@@ -396,66 +469,136 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
-    void claudeContentArray_waitsForEveryToolApproval(JenkinsRule jenkins) throws Exception {
+    void setupScriptDoesNotTraceGeneratedAgentCommand(JenkinsRule jenkins) throws Exception {
+        String sensitivePrompt = "sensitive-prompt-not-for-build-log";
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "fake-cursor-trace-bin",
+                        "agent",
+                        "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"assistant\",\"message\":\"ok\"}'\n");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
         FreeStyleProject project =
                 newProject(
                         jenkins,
-                        "ai-build-parallel-approvals",
+                        "ai-build-no-command-trace",
                         b -> {
-                            b.setAgent(new ClaudeCodeAgentHandler());
-                            b.setPrompt("needs two approvals");
-                            b.setRequireApprovals(true);
-                            b.setApprovalTimeoutSeconds(30);
-                            b.setFailOnAgentError(true);
-                            b.setCommandOverride(
-                                    "echo '{\"type\":\"assistant\",\"message\":{\"content\":["
-                                            + "{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"Bash\",\"input\":{\"command\":\"pwd\"}},"
-                                            + "{\"type\":\"tool_use\",\"id\":\"call-2\",\"name\":\"Read\",\"input\":{\"file_path\":\"README.md\"}}]}}'");
+                            b.setAgent(new CursorAgentHandler());
+                            b.setPrompt(sensitivePrompt);
+                            b.setSetupScript("true");
+                            b.setEnvironmentVariables("PATH=" + path);
                         });
 
-        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
-        assertNotNull(future);
-        FreeStyleBuild runningBuild = future.waitForStart();
-        ExecutionRegistry.PendingApproval first =
-                waitForPendingApproval(jenkins, runningBuild, future);
-        assertEquals("call-1", first.getToolCallId());
-
-        AiAgentRunAction action = runningBuild.getAction(AiAgentRunAction.class);
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
         assertNotNull(action);
-        ExecutionRegistry.LiveExecution liveExecution =
-                ExecutionRegistry.get(runningBuild, action.getLatestInvocationId());
-        assertNotNull(liveExecution);
-        assertTrue(liveExecution.approve(first.getId()));
 
-        ExecutionRegistry.PendingApproval second =
-                waitForPendingApproval(jenkins, runningBuild, future);
-        assertEquals("call-2", second.getToolCallId());
-        assertTrue(liveExecution.approve(second.getId()));
+        assertFalse(jenkins.getLog(build).contains(sensitivePrompt));
+        assertFalse(Files.readString(action.getRawLogFile().toPath()).contains(sensitivePrompt));
+    }
 
-        FreeStyleBuild build = future.get(10, TimeUnit.SECONDS);
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void setupScriptDoesNotTraceSensitiveValues(JenkinsRule jenkins) throws Exception {
+        String sensitiveValue = "setup-secret-not-for-build-log";
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-no-setup-trace",
+                        b -> {
+                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setSetupScript(
+                                    "export SETUP_SECRET='"
+                                            + sensitiveValue
+                                            + "'; test -n \"$SETUP_SECRET\"");
+                            b.setCommandOverride(
+                                    "echo '{\"type\":\"assistant\",\"message\":\"done\"}'");
+                        });
+
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+
+        assertFalse(jenkins.getLog(build).contains(sensitiveValue));
+        assertFalse(Files.readString(action.getRawLogFile().toPath()).contains(sensitiveValue));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void expandsParameterizedModelAndReasoningEffortInDefaultCommand(JenkinsRule jenkins)
+            throws Exception {
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "fake-codex-args-bin",
+                        "codex",
+                        "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-expanded-command-options",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setModel("${MODEL_CHOICE}");
+                            b.setReasoningEffort("${EFFORT_CHOICE}");
+                            b.setSetupScript("true");
+                            b.setEnvironmentVariables("PATH=" + path);
+                        });
+        project.addProperty(
+                new ParametersDefinitionProperty(
+                        new StringParameterDefinition("MODEL_CHOICE", "gpt-5.5"),
+                        new StringParameterDefinition("EFFORT_CHOICE", "xhigh")));
+
+        FreeStyleBuild build =
+                project.scheduleBuild2(
+                                0,
+                                new ParametersAction(
+                                        new StringParameterValue("MODEL_CHOICE", "gpt-5.5"),
+                                        new StringParameterValue("EFFORT_CHOICE", "xhigh")))
+                        .get();
         jenkins.assertBuildStatusSuccess(build);
-        assertEquals(
-                2,
-                action.getEvents().stream()
-                        .filter(event -> "tool_call".equals(event.getCategory()))
-                        .count());
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+
+        assertTrue(rawLog.contains("gpt-5.5"));
+        assertTrue(rawLog.contains("model_reasoning_effort=\"xhigh\""));
+        assertFalse(rawLog.contains("${MODEL_CHOICE}"));
+        assertFalse(rawLog.contains("${EFFORT_CHOICE}"));
+        assertEquals("gpt-5.5", action.getInvocationModel(action.getLatestInvocationId()));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void processLaunchFailureCompletesInvocationMetadata(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-launch-failure-metadata",
+                        b -> {
+                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setPrompt("test");
+                            b.setSetupScript("#!/definitely/missing/ai-agent-interpreter\ntrue");
+                            b.setCommandOverride("true");
+                        });
+
+        FreeStyleBuild build = project.scheduleBuild2(0).get();
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        int invocationId = action.getLatestInvocationId();
+
+        assertEquals(-1, action.getInvocationExitCode(invocationId));
+        assertFalse(action.getInvocationCompletedAt(invocationId).isEmpty());
     }
 
     @Test
     @EnabledOnOs(OS.LINUX)
     void openCodeAcp_waitsForJenkinsApprovalBeforeToolExecution(JenkinsRule jenkins)
             throws Exception {
-        File fakeBin = new File(jenkins.jenkins.getRootDir(), "fake-opencode-bin");
-        assertTrue(fakeBin.mkdirs());
-        File fakeOpenCode = new File(fakeBin, "opencode");
-        try (InputStream fixture =
-                getClass()
-                        .getResourceAsStream(
-                                "/io/jenkins/plugins/aiagentjob/fixtures/fake-opencode-acp.sh")) {
-            assertNotNull(fixture);
-            Files.copy(fixture, fakeOpenCode.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        }
-        assertTrue(fakeOpenCode.setExecutable(true));
+        File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-bin");
 
         String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
         FreeStyleProject project =
@@ -589,7 +732,9 @@ class AiAgentBuildExecutionTest {
                         b -> {
                             b.setAgent(new ClaudeCodeAgentHandler());
                             b.setPrompt("hello");
-                            b.setSetupScript("echo SETUP_SCRIPT_PATH=$0");
+                            b.setSetupScript(
+                                    "echo SETUP_SCRIPT_PATH=$0; "
+                                            + "echo SETUP_SCRIPT_MODE=$(stat -c %a \"$0\")");
                             b.setCommandOverride(
                                     "echo '{\"type\":\"assistant\",\"message\":\"remote\"}'");
                             b.setFailOnAgentError(true);
@@ -606,6 +751,7 @@ class AiAgentBuildExecutionTest {
         assertTrue(
                 log.contains("SETUP_SCRIPT_PATH=" + tempRoot.getRemote()),
                 "Setup script should run from the agent temp area");
+        assertTrue(log.contains("SETUP_SCRIPT_MODE=700"), "Temp script should be owner-only");
     }
 
     @Test
@@ -647,5 +793,31 @@ class AiAgentBuildExecutionTest {
         assertTrue(
                 rawLog.contains("/.codex/config.toml"),
                 "Codex config path should resolve inside the run-scoped home");
+    }
+
+    private static File installFakeOpenCode(JenkinsRule jenkins, String directoryName)
+            throws Exception {
+        File fakeBin = new File(jenkins.jenkins.getRootDir(), directoryName);
+        assertTrue(fakeBin.mkdirs());
+        File fakeOpenCode = new File(fakeBin, "opencode");
+        try (InputStream fixture =
+                AiAgentBuildExecutionTest.class.getResourceAsStream(
+                        "/io/jenkins/plugins/aiagentjob/fixtures/fake-opencode-acp.sh")) {
+            assertNotNull(fixture);
+            Files.copy(fixture, fakeOpenCode.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        }
+        assertTrue(fakeOpenCode.setExecutable(true));
+        return fakeBin;
+    }
+
+    private static File installExecutable(
+            JenkinsRule jenkins, String directoryName, String executableName, String content)
+            throws Exception {
+        File fakeBin = new File(jenkins.jenkins.getRootDir(), directoryName);
+        assertTrue(fakeBin.mkdirs());
+        File executable = new File(fakeBin, executableName);
+        Files.writeString(executable.toPath(), content);
+        assertTrue(executable.setExecutable(true));
+        return fakeBin;
     }
 }

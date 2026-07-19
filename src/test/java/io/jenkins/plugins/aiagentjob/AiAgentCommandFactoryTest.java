@@ -72,17 +72,16 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
-    void claudeCode_approvalsMode() {
+    void claudeCode_manualApprovalsAreRejected() {
         AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
         project.setRequireApprovals(true);
 
-        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test prompt");
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test prompt"));
 
-        assertTrue(
-                cmd.contains("--permission-mode=default"), "Should have --permission-mode=default");
-        assertFalse(
-                cmd.contains("--dangerously-skip-permissions"),
-                "Should NOT have --dangerously-skip-permissions");
+        assertTrue(error.getMessage().contains("ACP-capable"));
     }
 
     @Test
@@ -267,6 +266,19 @@ class AiAgentCommandFactoryTest {
         assertEquals("sonnet-4-thinking", cmd.get(modelIdx + 1));
     }
 
+    @Test
+    void cursorAgent_manualApprovalsAreRejected() {
+        AiAgentBuilder project = createProject(new CursorAgentHandler());
+        project.setRequireApprovals(true);
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("ACP-capable"));
+    }
+
     // ======================== OpenCode Command Tests ========================
 
     @Test
@@ -321,6 +333,20 @@ class AiAgentCommandFactoryTest {
         assertEquals("xhigh", execution.getReasoningEffort());
     }
 
+    @Test
+    void openCode_commandOverrideCannotUseManualApprovals() {
+        AiAgentBuilder project = createProject(new OpenCodeAgentHandler());
+        project.setRequireApprovals(true);
+        project.setCommandOverride("opencode acp --custom");
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("command override"));
+    }
+
     // ======================== Gemini CLI Command Tests ========================
 
     @Test
@@ -347,14 +373,16 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
-    void geminiCli_withApprovals() {
+    void geminiCli_manualApprovalsAreRejected() {
         AiAgentBuilder project = createProject(new GeminiCliAgentHandler());
         project.setRequireApprovals(true);
 
-        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
 
-        assertTrue(cmd.contains("--approval-mode"), "Should have --approval-mode");
-        assertTrue(cmd.contains("default"), "Should have default");
+        assertTrue(error.getMessage().contains("ACP-capable"));
     }
 
     @Test
