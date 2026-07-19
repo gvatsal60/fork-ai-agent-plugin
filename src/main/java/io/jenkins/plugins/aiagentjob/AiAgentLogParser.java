@@ -345,7 +345,11 @@ public final class AiAgentLogParser {
         private final String rawDetails;
         private final String toolCallId;
         private final boolean delta;
+
+        // Ephemeral parser identity, not a credential or persisted value.
+        @SuppressWarnings("lgtm[jenkins/plaintext-storage]")
         private final String deduplicationKey;
+
         private final Instant timestamp;
 
         private ParsedLine(
