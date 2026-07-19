@@ -8,10 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Builds the CLI command line for the selected agent handler. Also handles environment variable
- * parsing and command-to-string serialisation.
- */
+/** Builds the CLI command line for the selected agent handler and parses environment variables. */
 final class AiAgentCommandFactory {
     private AiAgentCommandFactory() {}
 
@@ -20,6 +17,7 @@ final class AiAgentCommandFactory {
         if (handler == null) {
             throw new IllegalStateException("No agent handler configured.");
         }
+        handler.validateExecution(config);
         List<String> command = new ArrayList<>(handler.buildDefaultCommand(config, prompt));
 
         String extraArgs = Util.fixEmptyAndTrim(config.getExtraArgs());
@@ -52,21 +50,5 @@ final class AiAgentCommandFactory {
             }
         }
         return values;
-    }
-
-    static String commandAsString(List<String> command) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < command.size(); i++) {
-            if (i > 0) {
-                sb.append(' ');
-            }
-            String token = command.get(i);
-            if (token.contains(" ") || token.contains("\"")) {
-                sb.append('"').append(token.replace("\"", "\\\"")).append('"');
-            } else {
-                sb.append(token);
-            }
-        }
-        return sb.toString();
     }
 }

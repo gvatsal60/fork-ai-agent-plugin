@@ -55,7 +55,9 @@ public final class AgentUsageStats implements Serializable {
 
     public long getTotalTokens() {
         if (totalTokens > 0) return totalTokens;
-        return inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
+        return saturatedAdd(
+                saturatedAdd(inputTokens, outputTokens),
+                saturatedAdd(cacheReadTokens, cacheWriteTokens));
     }
 
     public long getReasoningTokens() {
@@ -174,32 +176,39 @@ public final class AgentUsageStats implements Serializable {
 
     /** Increment input tokens (additive, for multi-step agents like OpenCode). */
     public void incrementInputTokens(long value) {
-        inputTokens += value;
+        inputTokens = saturatedAdd(inputTokens, value);
     }
 
     /** Increment output tokens (additive). */
     public void incrementOutputTokens(long value) {
-        outputTokens += value;
+        outputTokens = saturatedAdd(outputTokens, value);
     }
 
     /** Increment reasoning tokens (additive). */
     public void incrementReasoningTokens(long value) {
-        reasoningTokens += value;
+        reasoningTokens = saturatedAdd(reasoningTokens, value);
     }
 
     /** Increment total tokens (additive). */
     public void incrementTotalTokens(long value) {
-        totalTokens += value;
+        totalTokens = saturatedAdd(totalTokens, value);
     }
 
     /** Increment cache read tokens (additive). */
     public void incrementCacheReadTokens(long value) {
-        cacheReadTokens += value;
+        cacheReadTokens = saturatedAdd(cacheReadTokens, value);
     }
 
     /** Increment cache write tokens (additive). */
     public void incrementCacheWriteTokens(long value) {
-        cacheWriteTokens += value;
+        cacheWriteTokens = saturatedAdd(cacheWriteTokens, value);
+    }
+
+    /** Adds non-negative token counts without wrapping on malformed or oversized input. */
+    public static long saturatedAdd(long current, long value) {
+        long safeCurrent = Math.max(0, current);
+        if (value <= 0) return safeCurrent;
+        return safeCurrent > Long.MAX_VALUE - value ? Long.MAX_VALUE : safeCurrent + value;
     }
 
     /** Increment cost (additive). */

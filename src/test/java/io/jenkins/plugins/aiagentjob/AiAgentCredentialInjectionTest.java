@@ -66,7 +66,7 @@ class AiAgentCredentialInjectionTest {
                             b.setPrompt("test");
                             b.setApiCredentialsId("test-api-key");
                             b.setCommandOverride(
-                                    "echo \"{\\\"type\\\":\\\"system\\\",\\\"key_set\\\":\\\"$(test -n \\\"$ANTHROPIC_API_KEY\\\" && echo yes || echo no)\\\"}\"");
+                                    "echo \"{\\\"type\\\":\\\"system\\\",\\\"key_set\\\":\\\"$(test -n \\\"$ANTHROPIC_API_KEY\\\" && echo yes || echo no)\\\",\\\"key\\\":\\\"$ANTHROPIC_API_KEY\\\"}\"");
                             b.setFailOnAgentError(true);
                         });
 
@@ -76,11 +76,14 @@ class AiAgentCredentialInjectionTest {
 
         String rawLog = Files.readString(action.getRawLogFile().toPath(), StandardCharsets.UTF_8);
         assertTrue(rawLog.contains("\"key_set\":\"yes\""), "Env var should have been set");
+        assertTrue(rawLog.contains("\"key\":\"****\""), "Raw log should mask the API key");
+        assertFalse(rawLog.contains("sk-test-secret-12345"));
 
         String buildLog = build.getLog();
         assertTrue(
                 buildLog.contains("API key injected as ANTHROPIC_API_KEY"),
                 "Build log should mention API key injection");
+        assertFalse(buildLog.contains("sk-test-secret-12345"));
     }
 
     @Test
@@ -116,6 +119,48 @@ class AiAgentCredentialInjectionTest {
         assertTrue(
                 buildLog.contains("API key injected as ANTHROPIC_API_KEY"),
                 "Should inject as ANTHROPIC_API_KEY not OPENAI_API_KEY");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void masksMultilineAndShellMangledCredentialValues(JenkinsRule jenkins) throws Exception {
+        String firstLine = "multiline-secret-first";
+        String secondLine = "second-line's-secret";
+        StringCredentialsImpl cred =
+                new StringCredentialsImpl(
+                        CredentialsScope.GLOBAL,
+                        "multiline-key",
+                        "Multiline key",
+                        Secret.fromString(firstLine + "\n" + secondLine));
+        CredentialsProvider.lookupStores(jenkins.getInstance())
+                .iterator()
+                .next()
+                .addCredentials(Domain.global(), cred);
+
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "multiline-credential-test",
+                        b -> {
+                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setApiCredentialsId("multiline-key");
+                            b.setSetupScript("true");
+                            b.setCommandOverride("printf '%s\\n' \"$ANTHROPIC_API_KEY\"");
+                        });
+
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        String rawLog = Files.readString(action.getRawLogFile().toPath(), StandardCharsets.UTF_8);
+        String buildLog = build.getLog();
+
+        for (String secretFragment :
+                new String[] {firstLine, secondLine, "second-line'\\''s-secret"}) {
+            assertFalse(rawLog.contains(secretFragment), "Raw log leaked credential fragment");
+            assertFalse(buildLog.contains(secretFragment), "Build log leaked credential fragment");
+        }
+        assertTrue(rawLog.contains("****"));
+        assertTrue(buildLog.contains("****"));
     }
 
     @Test

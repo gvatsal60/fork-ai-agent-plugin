@@ -104,6 +104,81 @@ class AiAgentLogParserTest {
     }
 
     @Test
+    void claudeCodeContentArray_preservesParallelToolCallsWithAndWithoutExplicitFormat() {
+        String json =
+                "{\"type\":\"assistant\",\"message\":{\"content\":["
+                        + "{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"Bash\","
+                        + "\"input\":{\"command\":\"pwd\"}},"
+                        + "{\"type\":\"tool_use\",\"id\":\"call-2\",\"name\":\"Read\","
+                        + "\"input\":{\"file_path\":\"README.md\"}}]}}";
+
+        for (AiAgentLogFormat format :
+                new AiAgentLogFormat[] {ClaudeCodeLogFormat.INSTANCE, null}) {
+            List<AiAgentLogParser.ParsedLine> parsed = AiAgentLogParser.parseLines(1, json, format);
+
+            assertEquals(2, parsed.size());
+            assertTrue(parsed.stream().allMatch(AiAgentLogParser.ParsedLine::isToolCall));
+            assertEquals("call-1", parsed.get(0).getToolCallIdOrGenerated());
+            assertEquals("call-2", parsed.get(1).getToolCallIdOrGenerated());
+        }
+    }
+
+    @Test
+    void claudeCodeStreaming_mergesTextDeltas() throws IOException {
+        File temp = File.createTempFile("claude-deltas-", ".jsonl");
+        temp.deleteOnExit();
+        Files.write(
+                temp.toPath(),
+                List.of(
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
+                                + "\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}}",
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
+                                + "\"delta\":{\"type\":\"text_delta\",\"text\":\"world\"}}}"));
+
+        List<AiAgentLogParser.EventView> events =
+                AiAgentLogParser.parse(temp, ClaudeCodeLogFormat.INSTANCE);
+
+        assertEquals(1, events.size());
+        assertEquals("assistant", events.get(0).getCategory());
+        assertEquals("Hello world", events.get(0).getContent());
+    }
+
+    @Test
+    void claudeCodeStreaming_mergesThinkingDeltas() throws IOException {
+        File temp = File.createTempFile("claude-thinking-deltas-", ".jsonl");
+        temp.deleteOnExit();
+        Files.write(
+                temp.toPath(),
+                List.of(
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
+                                + "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Inspect \"}}}",
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
+                                + "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"tests\"}}}"));
+
+        List<AiAgentLogParser.EventView> events =
+                AiAgentLogParser.parse(temp, ClaudeCodeLogFormat.INSTANCE);
+
+        assertEquals(1, events.size());
+        assertEquals("thinking", events.get(0).getCategory());
+        assertEquals("Inspect tests", events.get(0).getContent());
+    }
+
+    @Test
+    void claudeCodeStreaming_hidesStructuralEvents() throws IOException {
+        File temp = File.createTempFile("claude-structure-", ".jsonl");
+        temp.deleteOnExit();
+        Files.write(
+                temp.toPath(),
+                List.of(
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\","
+                                + "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}}",
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\"}}",
+                        "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_stop\"}}"));
+
+        assertTrue(AiAgentLogParser.parse(temp, ClaudeCodeLogFormat.INSTANCE).isEmpty());
+    }
+
+    @Test
     void claudeCodeToolUseApproval_detectsMultipleToolCalls() throws IOException {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("claude-code-tool-use-approval.jsonl", ClaudeCodeLogFormat.INSTANCE);
@@ -664,7 +739,10 @@ class AiAgentLogParserTest {
     void claudeCodeConversation_hasCorrectEventCount() throws IOException {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("claude-code-conversation.jsonl", ClaudeCodeLogFormat.INSTANCE);
-        assertTrue(events.size() >= 5, "Should have at least 5 events for a full conversation");
+        assertEquals(
+                10,
+                events.size(),
+                "Cumulative Claude snapshots should produce 10 distinct visible events");
     }
 
     @Test

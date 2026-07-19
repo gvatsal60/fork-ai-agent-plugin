@@ -11,8 +11,10 @@ import hudson.Util;
 import hudson.console.LineTransformationOutputStream;
 import hudson.model.Run;
 import hudson.model.TaskListener;
+import hudson.util.ArgumentListBuilder;
 import hudson.util.StreamCopyThread;
 
+import org.jenkinsci.plugins.credentialsbinding.masking.SecretPatterns;
 import org.jenkinsci.plugins.plaincredentials.StringCredentials;
 
 import java.io.BufferedWriter;
@@ -32,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 /**
  * Runs the AI agent subprocess, wires stdout/stderr to the Jenkins build log and the raw JSONL log
@@ -55,6 +58,8 @@ final class AiAgentExecutor {
         String model = Util.replaceMacro(Util.fixNull(config.getModel()), env);
         String workDirValue = Util.replaceMacro(Util.fixNull(config.getWorkingDirectory()), env);
         String commandOverride = Util.fixNull(config.getCommandOverride()).trim();
+        AiAgentTypeHandler agent = config.getAgent();
+        agent.validateExecution(config);
 
         FilePath runDirectory = resolveRunDirectory(workspace, workDirValue);
         runDirectory.mkdirs();
@@ -64,6 +69,7 @@ final class AiAgentExecutor {
                 new LinkedHashMap<>(
                         AiAgentCommandFactory.parseEnvironmentVariables(
                                 config.getEnvironmentVariables())));
+        List<String> sensitiveValues = new ArrayList<>();
 
         // Inject API key from Jenkins Credentials if configured
         String credentialsId = Util.fixEmptyAndTrim(config.getApiCredentialsId());
@@ -76,7 +82,11 @@ final class AiAgentExecutor {
                             Collections.<DomainRequirement>emptyList());
             if (cred != null) {
                 String envVarName = config.getEffectiveApiKeyEnvVar();
-                procEnv.put(envVarName, cred.getSecret().getPlainText());
+                String secretValue = cred.getSecret().getPlainText();
+                procEnv.put(envVarName, secretValue);
+                if (!secretValue.isEmpty()) {
+                    sensitiveValues.add(secretValue);
+                }
                 listener.getLogger()
                         .println(
                                 "[ai-agent] API key injected as "
@@ -104,150 +114,166 @@ final class AiAgentExecutor {
                             + "Use Command override for Windows nodes.");
         }
         AiAgentExecutionCustomization executionCustomization =
-                config.getAgent().prepareExecution(config, workspace, listener);
-        procEnv.putAll(executionCustomization.getEnvironment());
-
-        AiAgentTypeHandler.AcpExecutionSpec acpExecution =
-                commandOverride.isEmpty() && config.isRequireApprovals() && !config.isYoloMode()
-                        ? config.getAgent().buildAcpExecution(config)
-                        : null;
-
-        List<String> agentCommand;
-        if (!commandOverride.isEmpty()) {
-            agentCommand = List.of(commandOverride);
-        } else if (acpExecution != null) {
-            agentCommand = acpExecution.getCommand();
-        } else {
-            agentCommand = AiAgentCommandFactory.buildDefaultCommand(config, prompt);
-        }
-
-        boolean needsShellEnvironmentBootstrap =
-                launcher.isUnix() && !executionCustomization.getEnvironment().isEmpty();
-        boolean disableInteractive = config.isDisableInteractive() && acpExecution == null;
-        boolean forceUnixShell = disableInteractive && launcher.isUnix();
-        List<String> command;
+                agent.prepareExecution(config, workspace, listener);
         FilePath tempSetupScript = null;
-        if ((!setupScript.isEmpty() && launcher.isUnix())
-                || needsShellEnvironmentBootstrap
-                || forceUnixShell) {
-            String combinedScript =
-                    buildCombinedScript(
-                            setupScript,
-                            executionCustomization.getEnvironment(),
-                            agentCommand,
-                            commandOverride,
-                            disableInteractive);
-            tempSetupScript = writeTempScript(workspace, combinedScript);
-            command = buildShellCommand(combinedScript, tempSetupScript);
-        } else if (!commandOverride.isEmpty()) {
-            if (launcher.isUnix()) {
-                // Use a non-login shell so injected HOME/USERPROFILE are not overridden.
-                command = List.of("/bin/sh", "-c", commandOverride);
-            } else {
-                String cmd = commandOverride;
-                if (disableInteractive && !cmd.toUpperCase().contains("< NUL")) {
-                    cmd =
-                            cmd.endsWith("\n")
-                                    ? cmd.substring(0, cmd.length() - 1) + " < NUL\n"
-                                    : cmd + " < NUL";
-                }
-                command = List.of("cmd", "/c", cmd);
-            }
-        } else if (disableInteractive) {
-            command =
-                    List.of(
-                            "cmd",
-                            "/c",
-                            AiAgentCommandFactory.commandAsString(agentCommand) + " < NUL");
-        } else {
-            command = agentCommand;
-        }
-
-        if (!setupScript.isEmpty()) {
-            listener.getLogger().println("[ai-agent] Setup script will run before the agent.");
-        }
-
-        String commandLine =
-                commandOverride.isEmpty()
-                        ? AiAgentCommandFactory.commandAsString(agentCommand)
-                        : commandOverride;
-        int invocationId =
-                action.markStarted(
-                        config.getAgent().getDescriptor().getDisplayName(),
-                        prompt,
-                        model,
-                        commandLine,
-                        config.isYoloMode(),
-                        config.isRequireApprovals());
-
-        File rawLogFile = action.getRawLogFile(invocationId);
-        Files.deleteIfExists(rawLogFile.toPath());
-
-        ExecutionRegistry.LiveExecution liveExecution =
-                ExecutionRegistry.register(run, invocationId);
-        Duration approvalTimeout =
-                Duration.ofSeconds(Math.max(1, config.getApprovalTimeoutSeconds()));
-
-        AgentOutputHandler outputHandler =
-                new AgentOutputHandler(
-                        listener.getLogger(),
-                        rawLogFile,
-                        liveExecution,
-                        config.isRequireApprovals() && !config.isYoloMode() && acpExecution == null,
-                        approvalTimeout,
-                        config.getAgent().getLogFormat());
-        OutputStream stdoutSink = new NonClosingSynchronizedOutputStream(outputHandler);
-        OutputStream stderrSink = new NonClosingSynchronizedOutputStream(outputHandler);
-
-        int exitCode;
         try {
-            if (acpExecution != null) {
-                exitCode =
-                        executeAcpProcess(
-                                launcher,
-                                command,
-                                runDirectory,
-                                procEnv,
-                                listener,
-                                outputHandler,
-                                liveExecution,
-                                approvalTimeout,
-                                prompt,
-                                acpExecution);
+            procEnv.putAll(executionCustomization.getEnvironment());
+
+            AiAgentTypeHandler.AcpExecutionSpec acpExecution =
+                    commandOverride.isEmpty() && config.isRequireApprovals() && !config.isYoloMode()
+                            ? agent.buildAcpExecution(config)
+                            : null;
+
+            List<String> agentCommand;
+            if (!commandOverride.isEmpty()) {
+                agentCommand = List.of(commandOverride);
+            } else if (acpExecution != null) {
+                agentCommand = acpExecution.getCommand();
             } else {
-                Proc proc =
-                        launcher.launch()
-                                .cmds(command)
-                                .pwd(runDirectory)
-                                .envs(procEnv)
-                                .stdout(stdoutSink)
-                                .stderr(stderrSink)
-                                .quiet(true)
-                                .start();
-                outputHandler.attach(proc);
-                exitCode = proc.join();
+                agentCommand = AiAgentCommandFactory.buildDefaultCommand(config, prompt);
             }
-        } finally {
-            outputHandler.close();
-            ExecutionRegistry.unregister(run, invocationId);
-            if (tempSetupScript != null) {
+
+            boolean needsShellEnvironmentBootstrap =
+                    launcher.isUnix() && !executionCustomization.getEnvironment().isEmpty();
+            boolean disableInteractive = config.isDisableInteractive() && acpExecution == null;
+            List<String> command;
+            if ((!setupScript.isEmpty() && launcher.isUnix()) || needsShellEnvironmentBootstrap) {
+                String combinedScript =
+                        buildCombinedScript(
+                                setupScript,
+                                executionCustomization.getEnvironment(),
+                                agentCommand,
+                                commandOverride);
+                tempSetupScript = writeTempScript(workspace, combinedScript);
+                command = buildShellCommand(combinedScript, tempSetupScript);
+            } else if (!commandOverride.isEmpty()) {
+                if (launcher.isUnix()) {
+                    // Use a non-login shell so injected HOME/USERPROFILE are not overridden.
+                    command = List.of("/bin/sh", "-c", commandOverride);
+                } else {
+                    command = List.of("cmd", "/c", commandOverride);
+                }
+            } else if (!launcher.isUnix()) {
+                command = buildWindowsCommand(agentCommand);
+            } else {
+                command = agentCommand;
+            }
+
+            if (!setupScript.isEmpty()) {
+                listener.getLogger().println("[ai-agent] Setup script will run before the agent.");
+            }
+
+            int invocationId =
+                    action.markStarted(
+                            agent.getDescriptor().getDisplayName(),
+                            "",
+                            model,
+                            "",
+                            config.isYoloMode(),
+                            config.isRequireApprovals());
+
+            AgentOutputHandler outputHandler = null;
+            boolean registered = false;
+            int exitCode;
+            try {
+                File rawLogFile = action.getRawLogFile(invocationId);
+                Files.deleteIfExists(rawLogFile.toPath());
+
+                ExecutionRegistry.LiveExecution liveExecution =
+                        ExecutionRegistry.register(run, invocationId);
+                registered = true;
+                Duration approvalTimeout =
+                        Duration.ofSeconds(Math.max(1, config.getApprovalTimeoutSeconds()));
+
+                outputHandler =
+                        new AgentOutputHandler(
+                                listener.getLogger(),
+                                rawLogFile,
+                                liveExecution,
+                                config.isRequireApprovals()
+                                        && !config.isYoloMode()
+                                        && acpExecution == null,
+                                approvalTimeout,
+                                agent.getLogFormat(),
+                                sensitiveValues);
+                OutputStream stdoutSink = new NonClosingSynchronizedOutputStream(outputHandler);
+                OutputStream stderrSink = new NonClosingSynchronizedOutputStream(outputHandler);
+
+                if (acpExecution != null) {
+                    exitCode =
+                            executeAcpProcess(
+                                    launcher,
+                                    command,
+                                    runDirectory,
+                                    procEnv,
+                                    listener,
+                                    outputHandler,
+                                    liveExecution,
+                                    approvalTimeout,
+                                    prompt,
+                                    acpExecution);
+                } else {
+                    Launcher.ProcStarter procStarter =
+                            launcher.launch()
+                                    .cmds(command)
+                                    .pwd(runDirectory)
+                                    .envs(procEnv)
+                                    .stdout(stdoutSink)
+                                    .stderr(stderrSink)
+                                    .quiet(true);
+                    if (disableInteractive) {
+                        procStarter.stdin(InputStream.nullInputStream());
+                    }
+                    Proc proc = procStarter.start();
+                    outputHandler.attach(proc);
+                    try {
+                        exitCode = proc.join();
+                        outputHandler.awaitTermination();
+                    } catch (IOException | InterruptedException e) {
+                        outputHandler.requestTermination();
+                        try {
+                            outputHandler.awaitTermination();
+                        } catch (IOException | InterruptedException terminationFailure) {
+                            if (terminationFailure != e) {
+                                e.addSuppressed(terminationFailure);
+                            }
+                        }
+                        throw e;
+                    }
+                }
+            } finally {
                 try {
-                    tempSetupScript.delete();
-                } catch (IOException e) {
-                    listener.getLogger()
-                            .println(
-                                    "[ai-agent] Warning: could not delete temp script: "
-                                            + e.getMessage());
+                    if (outputHandler != null) {
+                        outputHandler.close();
+                    }
+                } finally {
+                    if (registered) {
+                        ExecutionRegistry.unregister(run, invocationId);
+                    }
                 }
             }
-            executionCustomization.cleanup(listener);
-        }
 
-        if (outputHandler.wasDeniedByApproval()) {
-            exitCode = 1;
+            if (outputHandler.wasDeniedByApproval()) {
+                exitCode = 1;
+            }
+            action.markCompleted(invocationId, exitCode);
+            return exitCode;
+        } finally {
+            try {
+                if (tempSetupScript != null) {
+                    try {
+                        tempSetupScript.delete();
+                    } catch (IOException e) {
+                        listener.getLogger()
+                                .println(
+                                        "[ai-agent] Warning: could not delete temp script: "
+                                                + e.getMessage());
+                    }
+                }
+            } finally {
+                executionCustomization.cleanup(listener);
+            }
         }
-        action.markCompleted(invocationId, exitCode);
-        return exitCode;
     }
 
     private static int executeAcpProcess(
@@ -317,18 +343,11 @@ final class AiAgentExecutor {
             String setupScript,
             Map<String, String> shellEnvironment,
             List<String> agentCommand,
-            String commandOverride,
-            boolean disableInteractive) {
+            String commandOverride) {
         StringBuilder sb = new StringBuilder();
         appendShebangAwarePreamble(sb, setupScript, shellEnvironment);
         if (!commandOverride.isEmpty()) {
             String cmd = commandOverride;
-            if (disableInteractive && !cmd.contains("< /dev/null")) {
-                cmd =
-                        cmd.endsWith("\n")
-                                ? cmd.substring(0, cmd.length() - 1) + " < /dev/null\n"
-                                : cmd + " < /dev/null";
-            }
             sb.append(cmd);
             if (!cmd.endsWith("\n")) {
                 sb.append('\n');
@@ -337,9 +356,6 @@ final class AiAgentExecutor {
             sb.append("exec");
             for (String token : agentCommand) {
                 sb.append(' ').append(shellQuote(token));
-            }
-            if (disableInteractive) {
-                sb.append(" < /dev/null");
             }
             sb.append('\n');
         }
@@ -425,6 +441,10 @@ final class AiAgentExecutor {
         return "'" + s.replace("'", "'\\''") + "'";
     }
 
+    static List<String> buildWindowsCommand(List<String> command) {
+        return new ArgumentListBuilder().add(command).toWindowsCommand().toList();
+    }
+
     private static FilePath resolveRunDirectory(FilePath workspace, String workDirValue) {
         String trimmed = Util.fixNull(workDirValue).trim();
         if (trimmed.isEmpty()) {
@@ -476,8 +496,14 @@ final class AiAgentExecutor {
         private final boolean approvalsEnabled;
         private final Duration approvalTimeout;
         private final AiAgentLogFormat logFormat;
+        private final Pattern sensitivePattern;
+        private final AiAgentLogParser.ParseState parseState = new AiAgentLogParser.ParseState();
         private final AtomicLong lineCounter = new AtomicLong();
+        private final Object terminationLock = new Object();
         private volatile Proc proc;
+        private volatile boolean terminationRequested;
+        private volatile Thread terminationThread;
+        private volatile IOException terminationFailure;
         private volatile boolean deniedByApproval;
 
         AgentOutputHandler(
@@ -486,7 +512,8 @@ final class AiAgentExecutor {
                 ExecutionRegistry.LiveExecution liveExecution,
                 boolean approvalsEnabled,
                 Duration approvalTimeout,
-                AiAgentLogFormat logFormat)
+                AiAgentLogFormat logFormat,
+                List<String> sensitiveValues)
                 throws IOException {
             this.logger = logger;
             this.rawWriter =
@@ -498,10 +525,65 @@ final class AiAgentExecutor {
             this.approvalsEnabled = approvalsEnabled;
             this.approvalTimeout = approvalTimeout;
             this.logFormat = logFormat;
+            this.sensitivePattern =
+                    SecretPatterns.getAggregateSecretPattern(
+                            expandSensitiveValues(sensitiveValues));
         }
 
         void attach(Proc proc) {
-            this.proc = proc;
+            synchronized (terminationLock) {
+                this.proc = proc;
+                startTerminationLocked();
+            }
+        }
+
+        void requestTermination() {
+            liveExecution.cancelPendingApprovals("agent process terminated");
+            synchronized (terminationLock) {
+                terminationRequested = true;
+                startTerminationLocked();
+            }
+        }
+
+        void awaitTermination() throws IOException, InterruptedException {
+            Thread thread;
+            synchronized (terminationLock) {
+                thread = terminationThread;
+            }
+            if (thread == null) {
+                return;
+            }
+            thread.join();
+            IOException failure = terminationFailure;
+            if (failure != null) {
+                throw failure;
+            }
+        }
+
+        private void startTerminationLocked() {
+            if (!terminationRequested || proc == null || terminationThread != null) {
+                return;
+            }
+            Proc processToKill = proc;
+            Thread thread =
+                    new Thread(
+                            () -> {
+                                try {
+                                    processToKill.kill();
+                                } catch (IOException e) {
+                                    terminationFailure = e;
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    terminationFailure =
+                                            new IOException(
+                                                    "Interrupted while terminating agent process.",
+                                                    e);
+                                }
+                            },
+                            "ai-agent-process-terminator");
+            thread.setDaemon(true);
+            terminationThread = thread;
+            thread.start();
         }
 
         boolean wasDeniedByApproval() {
@@ -515,7 +597,7 @@ final class AiAgentExecutor {
         }
 
         synchronized void recordLine(String rawLine) throws IOException {
-            String line = rawLine;
+            String line = maskSensitiveValues(rawLine);
             if (line.endsWith("\r")) {
                 line = line.substring(0, line.length() - 1);
             }
@@ -533,40 +615,63 @@ final class AiAgentExecutor {
             }
 
             long id = lineCounter.incrementAndGet();
-            AiAgentLogParser.ParsedLine parsedLine =
-                    AiAgentLogParser.parseLine(id, line, logFormat);
-            if (!parsedLine.isToolCall()) {
-                return;
-            }
-
-            ExecutionRegistry.PendingApproval pending =
-                    liveExecution.createPendingApproval(
-                            parsedLine.getToolCallIdOrGenerated(),
-                            parsedLine.getToolName(),
-                            parsedLine.getSummary());
-            writeStatus(
-                    "Approval required: "
-                            + pending.getToolName()
-                            + " ("
-                            + pending.getToolCallId()
-                            + ")");
-
-            ExecutionRegistry.ApprovalDecision decision =
-                    liveExecution.awaitDecision(pending, approvalTimeout);
-            if (!decision.isApproved()) {
-                deniedByApproval = true;
-                writeStatus("Approval denied: " + decision.getReason());
-                Proc currentProc = this.proc;
-                if (currentProc != null) {
-                    try {
-                        currentProc.kill();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
+            for (AiAgentLogParser.ParsedLine parsedLine :
+                    AiAgentLogParser.parseLines(id, line, logFormat)) {
+                if (!parseState.shouldEmit(parsedLine)) {
+                    continue;
                 }
-            } else {
+                if (!parsedLine.isToolCall()) {
+                    continue;
+                }
+
+                ExecutionRegistry.PendingApproval pending =
+                        liveExecution.createPendingApproval(
+                                parsedLine.getToolCallIdOrGenerated(),
+                                parsedLine.getToolName(),
+                                parsedLine.getSummary());
+                writeStatus(
+                        "Approval required: "
+                                + pending.getToolName()
+                                + " ("
+                                + pending.getToolCallId()
+                                + ")");
+
+                ExecutionRegistry.ApprovalDecision decision =
+                        liveExecution.awaitDecision(pending, approvalTimeout);
+                if (!decision.isApproved()) {
+                    deniedByApproval = true;
+                    try {
+                        writeStatus("Approval denied: " + decision.getReason());
+                    } finally {
+                        requestTermination();
+                    }
+                    return;
+                }
                 writeStatus("Approval granted: " + pending.getToolName());
             }
+        }
+
+        private String maskSensitiveValues(String value) {
+            if (sensitivePattern.pattern().isEmpty()) {
+                return value;
+            }
+            return sensitivePattern.matcher(value).replaceAll("****");
+        }
+
+        private static List<String> expandSensitiveValues(List<String> sensitiveValues) {
+            List<String> expanded = new ArrayList<>();
+            for (String sensitiveValue : sensitiveValues) {
+                if (sensitiveValue == null || sensitiveValue.isEmpty()) {
+                    continue;
+                }
+                expanded.add(sensitiveValue);
+                for (String line : sensitiveValue.split("\\R")) {
+                    if (!line.isEmpty()) {
+                        expanded.add(line);
+                    }
+                }
+            }
+            return expanded;
         }
 
         synchronized void writeStatus(String message) throws IOException {

@@ -41,6 +41,15 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
     }
 
     @Override
+    public void validateExecution(AiAgentConfiguration config) {
+        if (config.isRequireApprovals() && !config.isYoloMode()) {
+            throw new IllegalArgumentException(
+                    "Codex CLI does not expose a non-interactive approval channel. "
+                            + "Disable manual approvals or use an agent with ACP support.");
+        }
+    }
+
+    @Override
     public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
         List<String> command = new ArrayList<>();
         command.add("codex");
@@ -96,11 +105,21 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
         FilePath tempDir = AiAgentTempFiles.tempRoot(workspace);
         FilePath homeDir = tempDir.child("ai-agent-codex-home-" + System.nanoTime());
         FilePath codexDir = homeDir.child(".codex");
-        codexDir.mkdirs();
-        codexDir.child("config.toml").write(Util.fixNull(customConfigToml), "UTF-8");
+        try {
+            codexDir.mkdirs();
+            codexDir.child("config.toml").write(Util.fixNull(customConfigToml), "UTF-8");
+        } catch (IOException | InterruptedException e) {
+            try {
+                homeDir.deleteRecursive();
+            } catch (IOException | InterruptedException cleanupFailure) {
+                e.addSuppressed(cleanupFailure);
+            }
+            throw e;
+        }
         String codexHome = homeDir.getRemote();
         customization.putEnvironment("HOME", codexHome);
         customization.putEnvironment("USERPROFILE", codexHome);
+        customization.putEnvironment("CODEX_HOME", codexDir.getRemote());
         customization.addCleanupAction(homeDir::deleteRecursive);
         listener.getLogger()
                 .println("[ai-agent] Using job-scoped Codex config.toml from agent configuration.");

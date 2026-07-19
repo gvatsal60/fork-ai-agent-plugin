@@ -100,6 +100,7 @@ class AgentUsageStatsTest {
         assertEquals(108, stats.getOutputTokens());
         assertEquals(30976, stats.getCacheReadTokens());
         assertEquals(49, stats.getReasoningTokens());
+        assertEquals(42689, stats.getTotalTokens());
     }
 
     @Test
@@ -107,6 +108,19 @@ class AgentUsageStatsTest {
         AgentUsageStats stats = parseStats("stats-codex.jsonl", CodexStatsExtractor.INSTANCE);
         assertEquals("", stats.getCostDisplay());
         assertEquals("", stats.getDurationDisplay());
+    }
+
+    @Test
+    void codex_negativeUsageDoesNotReduceTotal() {
+        AgentUsageStats stats = new AgentUsageStats();
+        stats.extractFrom(
+                JSONObject.fromObject(
+                        "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":-7,\"output_tokens\":5}}"),
+                CodexStatsExtractor.INSTANCE);
+
+        assertEquals(0, stats.getInputTokens());
+        assertEquals(5, stats.getOutputTokens());
+        assertEquals(5, stats.getTotalTokens());
     }
 
     // ======================== OpenCode ========================
@@ -138,6 +152,24 @@ class AgentUsageStatsTest {
         assertEquals(9000 + 7000, stats.getCacheWriteTokens());
         assertEquals(10000 + 8000, stats.getTotalTokens());
         assertEquals(0.005 + 0.003, stats.getCostUsd(), 0.0001);
+    }
+
+    @Test
+    void openCode_tokenAggregationSaturatesInsteadOfOverflowing() {
+        AgentUsageStats stats = new AgentUsageStats();
+        stats.extractFrom(
+                JSONObject.fromObject(
+                        "{\"type\":\"step_finish\",\"part\":{\"tokens\":{\"input\":"
+                                + Long.MAX_VALUE
+                                + "}}}"),
+                OpenCodeStatsExtractor.INSTANCE);
+        stats.extractFrom(
+                JSONObject.fromObject(
+                        "{\"type\":\"step_finish\",\"part\":{\"tokens\":{\"input\":1}}}"),
+                OpenCodeStatsExtractor.INSTANCE);
+
+        assertEquals(Long.MAX_VALUE, stats.getInputTokens());
+        assertTrue(stats.hasData());
     }
 
     @Test

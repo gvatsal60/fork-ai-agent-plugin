@@ -31,6 +31,9 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
 
     public abstract String getDefaultApiKeyEnvVar();
 
+    /** Rejects unsupported execution settings before any process or temporary file is created. */
+    public void validateExecution(AiAgentConfiguration config) {}
+
     public abstract List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt);
 
     /**

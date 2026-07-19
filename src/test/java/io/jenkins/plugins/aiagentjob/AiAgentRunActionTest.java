@@ -24,6 +24,7 @@ import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import java.io.File;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
@@ -69,6 +70,14 @@ class AiAgentRunActionTest {
                         b -> b.setCommandOverride("echo '{\"type\":\"system\"}'"));
         FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
         int buildNumber = build.getNumber();
+        AiAgentRunAction initialAction = build.getAction(AiAgentRunAction.class);
+        assertNotNull(initialAction);
+        AiAgentRunAction.InvocationRecord legacyInvocation = initialAction.getInvocations().get(0);
+        setField(legacyInvocation, "prompt", "legacy-sensitive-prompt");
+        setField(legacyInvocation, "commandLine", "legacy-sensitive-command");
+        build.save();
+        File buildXml = new File(build.getRootDir(), "build.xml");
+        assertTrue(Files.readString(buildXml.toPath()).contains("legacy-sensitive-prompt"));
 
         jenkins.jenkins.reload();
 
@@ -79,12 +88,21 @@ class AiAgentRunActionTest {
         assertNotNull(reloadedBuild);
         AiAgentRunAction action = reloadedBuild.getAction(AiAgentRunAction.class);
         assertNotNull(action);
+        AiAgentRunAction.InvocationRecord scrubbedInvocation = action.getInvocations().get(0);
+        assertEquals("", scrubbedInvocation.getPrompt());
+        assertEquals("", scrubbedInvocation.getCommandLine());
+        String scrubbedBuildXml = Files.readString(buildXml.toPath());
+        assertFalse(scrubbedBuildXml.contains("legacy-sensitive-prompt"));
+        assertFalse(scrubbedBuildXml.contains("legacy-sensitive-command"));
 
         int invocationId =
                 action.markStarted("Codex", "continue", "gpt-5.5", "codex exec", false, false);
 
         assertEquals(2, invocationId);
         assertEquals(2, action.getInvocations().size());
+        AiAgentRunAction.InvocationRecord invocation = action.getInvocations().get(1);
+        assertEquals("", invocation.getPrompt());
+        assertEquals("", invocation.getCommandLine());
     }
 
     @Test
@@ -308,7 +326,7 @@ class AiAgentRunActionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
-    void conversationPage_showsPromptAndFullConversationLinkTarget(JenkinsRule jenkins)
+    void conversationPage_hidesPromptAndShowsFullConversationLinkTarget(JenkinsRule jenkins)
             throws Exception {
         FreeStyleProject project =
                 newProject(
@@ -328,7 +346,7 @@ class AiAgentRunActionTest {
         String text = page.asNormalizedText();
 
         assertTrue(text.contains("AI Agent Conversation #1"));
-        assertTrue(text.contains("Explain this repository in detail"));
+        assertFalse(text.contains("Explain this repository in detail"));
         assertTrue(text.contains("Raw Log"));
     }
 
@@ -347,5 +365,11 @@ class AiAgentRunActionTest {
             assertNotNull(is, "Resource should exist: " + resourcePath);
             return new String(is.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    private static void setField(Object target, String name, String value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }

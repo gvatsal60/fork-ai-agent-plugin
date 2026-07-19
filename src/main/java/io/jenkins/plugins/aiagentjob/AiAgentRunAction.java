@@ -32,12 +32,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Per-build action that stores AI agent invocation metadata and provides the inline conversation
  * view on the build page. Supports multiple invocations in a single build.
  */
 public class AiAgentRunAction implements Action, RunAction2 {
+    private static final Logger LOGGER = Logger.getLogger(AiAgentRunAction.class.getName());
     private static final String RAW_LOG_FILE_PREFIX = "ai-agent-stream-";
     private static final String RAW_LOG_FILE_SUFFIX = ".jsonl";
 
@@ -76,12 +79,14 @@ public class AiAgentRunAction implements Action, RunAction2 {
     public void onAttached(Run<?, ?> run) {
         initializeTransientState();
         this.run = run;
+        clearSensitiveInvocationMetadata();
     }
 
     @Override
     public void onLoad(Run<?, ?> run) {
         initializeTransientState();
         this.run = run;
+        clearSensitiveInvocationMetadata();
     }
 
     public int markStarted(
@@ -94,13 +99,14 @@ public class AiAgentRunAction implements Action, RunAction2 {
             throws IOException {
         synchronized (stateLock) {
             int id = nextInvocationId++;
+            // Prompt and command values may contain credentials expanded by Pipeline or EnvVars.
             InvocationRecord invocation =
                     new InvocationRecord(
                             id,
                             agentTypeDisplayName == null ? "" : agentTypeDisplayName,
-                            prompt == null ? "" : prompt,
+                            "",
                             model == null ? "" : model,
-                            commandLine == null ? "" : commandLine,
+                            "",
                             yoloMode,
                             approvalsEnabled,
                             System.currentTimeMillis());
@@ -522,6 +528,7 @@ public class AiAgentRunAction implements Action, RunAction2 {
 
         File raw = getRawLogFile(invocationId);
         List<AiAgentLogParser.EventView> newEvents = new ArrayList<>();
+        AiAgentLogParser.ParseState parseState = new AiAgentLogParser.ParseState();
         long lineCount = 0;
 
         if (raw != null && raw.exists()) {
@@ -531,13 +538,15 @@ public class AiAgentRunAction implements Action, RunAction2 {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     lineCount++;
-                    if (lineCount <= startLine) {
-                        continue;
-                    }
-                    AiAgentLogParser.EventView ev =
-                            AiAgentLogParser.parseLine(lineCount, line, format).toEventView();
-                    if (!ev.isEmpty()) {
-                        newEvents.add(ev);
+                    for (AiAgentLogParser.ParsedLine parsedLine :
+                            AiAgentLogParser.parseLines(lineCount, line, format)) {
+                        if (!parseState.shouldEmit(parsedLine) || lineCount <= startLine) {
+                            continue;
+                        }
+                        AiAgentLogParser.EventView ev = parsedLine.toEventView();
+                        if (!ev.isEmpty()) {
+                            newEvents.add(ev);
+                        }
                     }
                 }
             }
@@ -655,6 +664,33 @@ public class AiAgentRunAction implements Action, RunAction2 {
         }
     }
 
+    private void clearSensitiveInvocationMetadata() {
+        boolean changed = false;
+        synchronized (stateLock) {
+            for (InvocationRecord invocation : invocations) {
+                if (invocation.prompt != null && !invocation.prompt.isEmpty()) {
+                    invocation.prompt = "";
+                    changed = true;
+                }
+                if (invocation.commandLine != null && !invocation.commandLine.isEmpty()) {
+                    invocation.commandLine = "";
+                    changed = true;
+                }
+            }
+        }
+        if (changed && run != null) {
+            try {
+                run.save();
+            } catch (IOException e) {
+                LOGGER.log(
+                        Level.WARNING,
+                        "Could not persist removal of sensitive AI agent invocation metadata from "
+                                + run.getExternalizableId(),
+                        e);
+            }
+        }
+    }
+
     private int resolveRequestedInvocationId() {
         StaplerRequest2 request = Stapler.getCurrentRequest2();
         if (request != null) {
@@ -704,9 +740,9 @@ public class AiAgentRunAction implements Action, RunAction2 {
 
         private final int id;
         private final String agentType;
-        private final String prompt;
+        private String prompt;
         private final String model;
-        private final String commandLine;
+        private String commandLine;
         private final boolean yoloMode;
         private final boolean approvalsEnabled;
         private final long startedAtMillis;

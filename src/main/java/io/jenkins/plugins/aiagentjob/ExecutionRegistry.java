@@ -53,8 +53,8 @@ public final class ExecutionRegistry {
             String id = UUID.randomUUID().toString();
             PendingApproval pending =
                     new PendingApproval(id, toolCallId, toolName, inputSummary, Instant.now());
-            pendingApprovals.put(id, pending);
             decisions.put(id, new CompletableFuture<>());
+            pendingApprovals.put(id, pending);
             return pending;
         }
 
@@ -64,20 +64,24 @@ public final class ExecutionRegistry {
                 return ApprovalDecision.denied("approval request disappeared");
             }
             try {
-                ApprovalDecision decision = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-                pendingApprovals.remove(pendingApproval.getId());
-                decisions.remove(pendingApproval.getId());
-                return decision;
+                return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return ApprovalDecision.denied("interrupted while waiting for approval");
+                ApprovalDecision interrupted =
+                        ApprovalDecision.denied("interrupted while waiting for approval");
+                future.complete(interrupted);
+                return future.getNow(interrupted);
             } catch (ExecutionException e) {
                 return ApprovalDecision.denied("approval failed: " + e.getMessage());
             } catch (TimeoutException e) {
-                pendingApprovals.remove(pendingApproval.getId());
-                decisions.remove(pendingApproval.getId());
-                return ApprovalDecision.denied(
-                        "approval timed out after " + timeout.toSeconds() + "s");
+                ApprovalDecision timedOut =
+                        ApprovalDecision.denied(
+                                "approval timed out after " + timeout.toSeconds() + "s");
+                future.complete(timedOut);
+                return future.getNow(timedOut);
+            } finally {
+                pendingApprovals.remove(pendingApproval.getId(), pendingApproval);
+                decisions.remove(pendingApproval.getId(), future);
             }
         }
 
@@ -95,7 +99,6 @@ public final class ExecutionRegistry {
             boolean completed = future.complete(ApprovalDecision.approved());
             if (completed) {
                 pendingApprovals.remove(id);
-                decisions.remove(id);
             }
             return completed;
         }
@@ -108,9 +111,17 @@ public final class ExecutionRegistry {
             boolean completed = future.complete(ApprovalDecision.denied(reason));
             if (completed) {
                 pendingApprovals.remove(id);
-                decisions.remove(id);
             }
             return completed;
+        }
+
+        void cancelPendingApprovals(String reason) {
+            ApprovalDecision cancelled = ApprovalDecision.denied(reason);
+            for (Map.Entry<String, CompletableFuture<ApprovalDecision>> entry :
+                    decisions.entrySet()) {
+                entry.getValue().complete(cancelled);
+                pendingApprovals.remove(entry.getKey());
+            }
         }
     }
 

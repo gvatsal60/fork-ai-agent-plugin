@@ -188,13 +188,17 @@ Gemini CLI and Cursor Agent currently ignore the field in the built-in command t
 
 ### Credential Injection
 
-If the selected agent type has an associated credential ID (e.g., API key), the plugin resolves it from Jenkins credentials and injects it as an environment variable. The credential is masked in the build log.
+If the selected agent type has an associated credential ID (e.g., API key), the plugin resolves it from Jenkins credentials and injects it as an environment variable. The credential is masked in the build log and captured raw agent log.
+
+Prompt and command-line values are not retained in build action metadata because Pipeline and environment expansion may place credentials in either value.
 
 ### Approval Gates
 
 When approvals are enabled and YOLO mode is off, tool calls detected in the agent's output trigger a blocking approval request. The build pauses until a user approves or denies from the build page. Denied or timed-out requests fail the build.
 
 OpenCode approval builds use its bidirectional Agent Client Protocol server. The installed OpenCode CLI must support `opencode acp`. OpenCode builds without manual approvals continue to use `opencode run`.
+
+Codex CLI does not expose a non-interactive approval channel, so Codex jobs reject manual approvals instead of silently running with `--ask-for-approval never`.
 
 ### Usage Statistics
 

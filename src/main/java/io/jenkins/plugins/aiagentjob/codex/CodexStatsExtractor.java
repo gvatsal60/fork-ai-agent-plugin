@@ -25,6 +25,9 @@ public final class CodexStatsExtractor implements AiAgentStatsExtractor {
             JSONObject usage = json.optJSONObject("usage");
             if (usage != null) {
                 stats.accumulateUsage(usage);
+                long input = usage.optLong("input_tokens", 0);
+                long output = usage.optLong("output_tokens", 0);
+                stats.addTotalTokens(AgentUsageStats.saturatedAdd(input, output));
             }
             return true;
         }

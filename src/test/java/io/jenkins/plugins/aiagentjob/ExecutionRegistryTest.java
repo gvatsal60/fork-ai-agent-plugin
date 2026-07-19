@@ -59,6 +59,19 @@ class ExecutionRegistryTest {
     }
 
     @Test
+    void approveBeforeAwait_resolvesDecision() {
+        ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
+        ExecutionRegistry.PendingApproval pending =
+                live.createPendingApproval("tc-1", "bash", "ls");
+
+        assertTrue(live.approve(pending.getId()));
+
+        ExecutionRegistry.ApprovalDecision decision =
+                live.awaitDecision(pending, Duration.ofSeconds(1));
+        assertTrue(decision.isApproved(), "Early approval should remain available to the executor");
+    }
+
+    @Test
     void deny_resolvesDecision() {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
@@ -117,5 +130,25 @@ class ExecutionRegistryTest {
     void deny_returnsFalseForUnknownId() {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         assertFalse(live.deny("nonexistent-id", "reason"));
+    }
+
+    @Test
+    void cancelPendingApprovals_deniesWaitersAndClearsCards() {
+        ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
+        ExecutionRegistry.PendingApproval first = live.createPendingApproval("tc-1", "bash", "ls");
+        ExecutionRegistry.PendingApproval second =
+                live.createPendingApproval("tc-2", "read", "README.md");
+
+        live.cancelPendingApprovals("build aborted");
+
+        assertTrue(live.getPendingApprovals().isEmpty());
+        ExecutionRegistry.ApprovalDecision firstDecision =
+                live.awaitDecision(first, Duration.ofSeconds(1));
+        ExecutionRegistry.ApprovalDecision secondDecision =
+                live.awaitDecision(second, Duration.ofSeconds(1));
+        assertFalse(firstDecision.isApproved());
+        assertFalse(secondDecision.isApproved());
+        assertEquals("build aborted", firstDecision.getReason());
+        assertEquals("build aborted", secondDecision.getReason());
     }
 }

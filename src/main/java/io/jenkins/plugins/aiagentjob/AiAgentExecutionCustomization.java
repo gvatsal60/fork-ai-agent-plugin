@@ -38,13 +38,21 @@ public final class AiAgentExecutionCustomization {
     }
 
     public void cleanup(TaskListener listener) {
+        boolean interrupted = false;
         for (CleanupAction cleanupAction : cleanupActions) {
             try {
                 cleanupAction.run();
-            } catch (IOException | InterruptedException e) {
+            } catch (InterruptedException e) {
+                interrupted = true;
+                listener.getLogger()
+                        .println("[ai-agent] Warning: cleanup failed: " + e.getMessage());
+            } catch (IOException e) {
                 listener.getLogger()
                         .println("[ai-agent] Warning: cleanup failed: " + e.getMessage());
             }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 }

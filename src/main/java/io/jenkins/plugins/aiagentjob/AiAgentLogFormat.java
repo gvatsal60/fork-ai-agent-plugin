@@ -2,6 +2,8 @@ package io.jenkins.plugins.aiagentjob;
 
 import net.sf.json.JSONObject;
 
+import java.util.List;
+
 /**
  * Strategy interface for classifying a JSON log line emitted by an AI agent into a {@link
  * AiAgentLogParser.ParsedLine}.
@@ -24,4 +26,16 @@ public interface AiAgentLogFormat {
      *     not handle the given JSON structure
      */
     AiAgentLogParser.ParsedLine classify(long lineNumber, JSONObject json);
+
+    /**
+     * Attempt to classify a JSON object that may contain multiple displayable events.
+     *
+     * <p>Implementations that emit at most one event can rely on this default. Returning {@code
+     * null} still means the format did not recognize the input; an empty list means it recognized
+     * the input but intentionally produced no visible events.
+     */
+    default List<AiAgentLogParser.ParsedLine> classifyAll(long lineNumber, JSONObject json) {
+        AiAgentLogParser.ParsedLine parsed = classify(lineNumber, json);
+        return parsed == null ? null : List.of(parsed);
+    }
 }

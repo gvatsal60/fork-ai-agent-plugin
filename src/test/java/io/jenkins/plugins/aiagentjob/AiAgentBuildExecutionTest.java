@@ -1,10 +1,12 @@
 package io.jenkins.plugins.aiagentjob;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.FilePath;
+import hudson.model.Executor;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.ParametersAction;
@@ -12,11 +14,14 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Result;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
+import hudson.model.TaskListener;
 import hudson.model.queue.QueueTaskFuture;
 import hudson.slaves.DumbSlave;
 import hudson.slaves.WorkspaceList;
 
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
+import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
+import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeStatsExtractor;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
@@ -27,13 +32,55 @@ import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @WithJenkins
 class AiAgentBuildExecutionTest {
+
+    public static final class FailingAfterPrepareAgent extends AiAgentTypeHandler {
+        private static final String TEMP_DIR_NAME = "ai-agent-cleanup-test";
+
+        @Override
+        public String getId() {
+            return "FAILING_AFTER_PREPARE";
+        }
+
+        @Override
+        public String getDefaultApiKeyEnvVar() {
+            return "TEST_API_KEY";
+        }
+
+        @Override
+        public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
+            throw new IllegalStateException("failure after prepare");
+        }
+
+        @Override
+        public AiAgentExecutionCustomization prepareExecution(
+                AiAgentConfiguration config, FilePath workspace, TaskListener listener)
+                throws IOException, InterruptedException {
+            FilePath tempDir = AiAgentTempFiles.tempRoot(workspace).child(TEMP_DIR_NAME);
+            tempDir.mkdirs();
+            AiAgentExecutionCustomization customization = AiAgentExecutionCustomization.empty();
+            customization.addCleanupAction(tempDir::deleteRecursive);
+            return customization;
+        }
+
+        @Override
+        public AiAgentLogFormat getLogFormat() {
+            return ClaudeCodeLogFormat.INSTANCE;
+        }
+
+        @Override
+        public AiAgentStatsExtractor getStatsExtractor() {
+            return ClaudeCodeStatsExtractor.INSTANCE;
+        }
+    }
 
     private FreeStyleProject newProject(
             JenkinsRule jenkins, String name, java.util.function.Consumer<AiAgentBuilder> cfg)
@@ -119,6 +166,28 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void setupFailureAfterPrepare_runsAgentCleanup(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-prepare-cleanup",
+                        b -> {
+                            b.setAgent(new FailingAfterPrepareAgent());
+                            b.setPrompt("hello");
+                        });
+
+        FreeStyleBuild build = project.scheduleBuild2(0).get();
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        FilePath workspace = build.getWorkspace();
+        assertNotNull(workspace);
+        assertFalse(
+                AiAgentTempFiles.tempRoot(workspace)
+                        .child(FailingAfterPrepareAgent.TEMP_DIR_NAME)
+                        .exists());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void setupScript_emptyIsSkipped(JenkinsRule jenkins) throws Exception {
         FreeStyleProject project =
                 newProject(
@@ -198,10 +267,12 @@ class AiAgentBuildExecutionTest {
                             codex.setCustomConfigToml("[mcp_servers.demo]\ncommand = \"npx\"");
                             b.setAgent(codex);
                             b.setPrompt("hello");
+                            b.setEnvironmentVariables("CODEX_HOME=/tmp/shared-codex-home");
                             b.setCommandOverride(
-                                    "cfg=\"$USERPROFILE/.codex/config.toml\"; "
+                                    "cfg=\"$CODEX_HOME/config.toml\"; "
                                             + "if test -f \"$cfg\"; then echo CODEX_CONFIG_FOUND; sed -n '1,200p' \"$cfg\"; "
-                                            + "else echo CODEX_CONFIG_MISSING home=$HOME userprofile=$USERPROFILE; fi; "
+                                            + "else echo CODEX_CONFIG_MISSING home=$HOME codex_home=$CODEX_HOME; fi; "
+                                            + "echo CODEX_HOME=$CODEX_HOME; "
                                             + "echo '{\"type\":\"assistant\",\"message\":\"done\"}'");
                             b.setFailOnAgentError(true);
                         });
@@ -218,6 +289,9 @@ class AiAgentBuildExecutionTest {
                 "Codex config should be written to run-scoped home");
         assertTrue(log.contains("command = \"npx\""), "Codex config should preserve TOML content");
         assertFalse(log.contains("CODEX_CONFIG_MISSING"), "Codex config should not be missing");
+        assertFalse(
+                log.contains("CODEX_HOME=/tmp/shared-codex-home"),
+                "Job-scoped config should override inherited CODEX_HOME");
     }
 
     @Test
@@ -239,12 +313,132 @@ class AiAgentBuildExecutionTest {
                                             + "echo '{\"type\":\"assistant\",\"message\":\"done\"}'");
                         });
 
-        FreeStyleBuild build = project.scheduleBuild2(0).get();
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild build = future.get(5, TimeUnit.SECONDS);
         jenkins.assertBuildStatus(Result.FAILURE, build);
 
         AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
         assertNotNull(action);
         assertTrue(action.getEvents().stream().anyMatch(e -> "tool_call".equals(e.getCategory())));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void abortWhileApprovalIsPendingCompletesPromptly(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-abort-approval",
+                        b -> {
+                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setPrompt("needs approval");
+                            b.setRequireApprovals(true);
+                            b.setApprovalTimeoutSeconds(60);
+                            b.setCommandOverride(
+                                    "echo '{\"type\":\"tool_call\",\"tool_name\":\"bash\",\"tool_call_id\":\"call-1\",\"text\":\"ls\"}'; sleep 60");
+                        });
+
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild runningBuild = future.waitForStart();
+        waitForPendingApproval(jenkins, runningBuild, future);
+
+        Executor executor = runningBuild.getExecutor();
+        assertNotNull(executor);
+        long started = System.nanoTime();
+        executor.interrupt(Result.ABORTED);
+
+        FreeStyleBuild build = future.get(10, TimeUnit.SECONDS);
+        assertEquals(Result.ABORTED, build.getResult());
+        assertTrue(
+                System.nanoTime() - started < TimeUnit.SECONDS.toNanos(10),
+                "Aborting should not wait for approval timeout");
+        assertTrue(
+                build.getAction(AiAgentRunAction.class).getPendingApprovals().isEmpty(),
+                "Aborting should remove pending approval cards");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void codexCommandOverrideCannotBypassApprovalValidation(JenkinsRule jenkins) throws Exception {
+        File marker = new File(jenkins.jenkins.getRootDir(), "codex-override-ran");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-codex-approval-override",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setRequireApprovals(true);
+                            b.setCommandOverride("touch '" + marker.getAbsolutePath() + "'");
+                        });
+
+        FreeStyleBuild build = project.scheduleBuild2(0).get();
+
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        assertFalse(marker.exists(), "Rejected Codex configuration must not launch override");
+        assertTrue(jenkins.getLog(build).contains("does not expose"));
+    }
+
+    @Test
+    void windowsCommandUsesCmdWithoutFlatteningLaunchMode() {
+        List<String> command =
+                AiAgentExecutor.buildWindowsCommand(
+                        List.of("codex", "exec", "prompt with spaces", "100% literal"));
+
+        assertEquals("cmd.exe", command.get(0));
+        assertEquals("/C", command.get(1));
+        String commandLine = String.join(" ", command.subList(2, command.size()));
+        assertTrue(commandLine.contains("prompt with spaces"));
+        assertTrue(commandLine.contains("100% literal"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void claudeContentArray_waitsForEveryToolApproval(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-parallel-approvals",
+                        b -> {
+                            b.setAgent(new ClaudeCodeAgentHandler());
+                            b.setPrompt("needs two approvals");
+                            b.setRequireApprovals(true);
+                            b.setApprovalTimeoutSeconds(30);
+                            b.setFailOnAgentError(true);
+                            b.setCommandOverride(
+                                    "echo '{\"type\":\"assistant\",\"message\":{\"content\":["
+                                            + "{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"Bash\",\"input\":{\"command\":\"pwd\"}},"
+                                            + "{\"type\":\"tool_use\",\"id\":\"call-2\",\"name\":\"Read\",\"input\":{\"file_path\":\"README.md\"}}]}}'");
+                        });
+
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild runningBuild = future.waitForStart();
+        ExecutionRegistry.PendingApproval first =
+                waitForPendingApproval(jenkins, runningBuild, future);
+        assertEquals("call-1", first.getToolCallId());
+
+        AiAgentRunAction action = runningBuild.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        ExecutionRegistry.LiveExecution liveExecution =
+                ExecutionRegistry.get(runningBuild, action.getLatestInvocationId());
+        assertNotNull(liveExecution);
+        assertTrue(liveExecution.approve(first.getId()));
+
+        ExecutionRegistry.PendingApproval second =
+                waitForPendingApproval(jenkins, runningBuild, future);
+        assertEquals("call-2", second.getToolCallId());
+        assertTrue(liveExecution.approve(second.getId()));
+
+        FreeStyleBuild build = future.get(10, TimeUnit.SECONDS);
+        jenkins.assertBuildStatusSuccess(build);
+        assertEquals(
+                2,
+                action.getEvents().stream()
+                        .filter(event -> "tool_call".equals(event.getCategory()))
+                        .count());
     }
 
     @Test
@@ -338,12 +532,12 @@ class AiAgentBuildExecutionTest {
             if (future.isDone()) {
                 FreeStyleBuild completed = future.get();
                 throw new AssertionError(
-                        "OpenCode ACP build completed before requesting approval:\n"
+                        "AI agent build completed before requesting approval:\n"
                                 + jenkins.getLog(completed));
             }
             Thread.sleep(50);
         }
-        throw new AssertionError("OpenCode ACP approval request did not reach Jenkins.");
+        throw new AssertionError("AI agent approval request did not reach Jenkins.");
     }
 
     @Test
@@ -355,7 +549,7 @@ class AiAgentBuildExecutionTest {
                         "ai-build-step-env",
                         b -> {
                             b.setAgent(new ClaudeCodeAgentHandler());
-                            b.setPrompt("hello");
+                            b.setPrompt("prompt-${SURROUNDING_VAR}");
                             b.setCommandOverride(
                                     "echo \"{\\\"type\\\":\\\"assistant\\\",\\\"message\\\":\\\"step=$SURROUNDING_VAR\\\"}\"");
                             b.setFailOnAgentError(true);
@@ -379,6 +573,9 @@ class AiAgentBuildExecutionTest {
         assertTrue(
                 rawLog.contains("step=from-parameter"),
                 "Command override should inherit step-scoped env vars");
+        AiAgentRunAction.InvocationRecord invocation = action.getInvocations().get(0);
+        assertEquals("", invocation.getPrompt());
+        assertEquals("", invocation.getCommandLine());
     }
 
     @Test
@@ -427,8 +624,8 @@ class AiAgentBuildExecutionTest {
                             b.setAgent(codex);
                             b.setPrompt("hello");
                             b.setCommandOverride(
-                                    "cfg=\"$HOME/.codex/config.toml\"; "
-                                            + "echo \"{\\\"type\\\":\\\"assistant\\\",\\\"message\\\":\\\"cfg=$cfg home=$HOME\\\"}\"");
+                                    "cfg=\"$CODEX_HOME/config.toml\"; "
+                                            + "echo \"{\\\"type\\\":\\\"assistant\\\",\\\"message\\\":\\\"cfg=$cfg home=$HOME codex_home=$CODEX_HOME\\\"}\"");
                             b.setFailOnAgentError(true);
                         });
         project.setAssignedNode(agent);
