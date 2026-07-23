@@ -1,8 +1,37 @@
 (function () {
+  function buildApprovalUrl(url, id, reason) {
+    const params = new URLSearchParams();
+    params.append('id', id);
+    if (reason != null && reason !== '') {
+      params.append('reason', reason);
+    }
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + params.toString();
+  }
+
+  function isSafeUrl(value, allowMailto, baseUrl) {
+    if (!value) {
+      return false;
+    }
+    try {
+      const base = baseUrl
+        || (typeof window !== 'undefined' ? window.location.href : 'https://localhost/');
+      const parsed = new URL(value, base);
+      return parsed.protocol === 'http:'
+        || parsed.protocol === 'https:'
+        || (allowMailto && parsed.protocol === 'mailto:');
+    } catch (e) {
+      return false;
+    }
+  }
+
   function esc(text) {
     const div = document.createElement('div');
     div.appendChild(document.createTextNode(text || ''));
     return div.innerHTML;
+  }
+
+  function escAttr(text) {
+    return esc(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function inlineMd(text) {
@@ -84,17 +113,72 @@
     return out;
   }
 
+  function sanitizeHtml(html) {
+    const allowedAttributes = {
+      A: ['href', 'title'],
+      CODE: ['class'],
+      IMG: ['src', 'alt', 'title'],
+      OL: ['start'],
+      TD: ['align', 'colspan', 'rowspan'],
+      TH: ['align', 'colspan', 'rowspan']
+    };
+    const allowedTags = new Set([
+      'A', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'EM', 'H1', 'H2', 'H3', 'H4',
+      'H5', 'H6', 'HR', 'IMG', 'LI', 'OL', 'P', 'PRE', 'STRONG', 'TABLE',
+      'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL'
+    ]);
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const elements = template.content.querySelectorAll('*');
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i];
+      if (!allowedTags.has(element.tagName)) {
+        if (element.parentNode) {
+          element.parentNode.replaceChild(
+            document.createTextNode(element.textContent || ''),
+            element
+          );
+        }
+        continue;
+      }
+
+      const allowed = allowedAttributes[element.tagName] || [];
+      const attributes = Array.prototype.slice.call(element.attributes);
+      for (let j = 0; j < attributes.length; j++) {
+        if (allowed.indexOf(attributes[j].name.toLowerCase()) === -1) {
+          element.removeAttribute(attributes[j].name);
+        }
+      }
+
+      if (element.tagName === 'A' && element.hasAttribute('href')) {
+        if (!isSafeUrl(element.getAttribute('href'), true)) {
+          element.removeAttribute('href');
+        }
+      } else if (element.tagName === 'IMG' && element.hasAttribute('src')) {
+        if (!isSafeUrl(element.getAttribute('src'), false)) {
+          element.removeAttribute('src');
+        }
+      }
+    }
+    const output = document.createElement('div');
+    output.appendChild(template.content.cloneNode(true));
+    return output.innerHTML;
+  }
+
   function mdToHtml(text) {
+    let html;
     if (window.marked && typeof window.marked.parse === 'function') {
-      return window.marked.parse(esc(text || ''), {
+      html = window.marked.parse(esc(text || ''), {
         async: false,
         breaks: true,
         gfm: true,
         headerIds: false,
         mangle: false
       });
+    } else {
+      html = mdToHtmlFallback(text);
     }
-    return mdToHtmlFallback(text);
+    return sanitizeHtml(html);
   }
 
   function renderMarkdownNodes(root) {
@@ -116,12 +200,12 @@
 
   function renderEvent(ev) {
     const cat = ev.category;
-    let html = '<div class="ai-ev" data-category="' + esc(cat) + '">';
+    let html = '<div class="ai-ev" data-category="' + escAttr(cat) + '">';
 
     if (cat === 'assistant' || cat === 'user' || cat === 'result' || cat === 'error') {
-      html += '<span class="ai-badge ai-badge-' + cat + '">' + esc(ev.label) + '</span>';
+      html += '<span class="ai-badge ai-badge-' + escAttr(cat) + '">' + esc(ev.label) + '</span>';
       const contentClasses = 'ai-msg-content' + (cat === 'assistant' ? ' ai-msg-content-assistant' : '');
-      html += '<div class="' + contentClasses + '" data-md="' + esc(ev.content || '') + '">' + mdToHtml(ev.content) + '</div>';
+      html += '<div class="' + contentClasses + '" data-md="' + escAttr(ev.content || '') + '">' + mdToHtml(ev.content) + '</div>';
     } else if (cat === 'tool_call') {
       html += '<details>';
       html += '<summary class="ai-tool-header ai-details-summary">';
@@ -157,12 +241,12 @@
       html += '<summary class="ai-details-summary">';
       html += '<span class="ai-badge ai-badge-thinking">Thinking</span>';
       html += '</summary>';
-      html += '<div class="ai-thinking-text">' + esc(ev.content) + '</div>';
+      html += '<div class="ai-thinking-text" data-content="' + escAttr(ev.content || '') + '">' + esc(ev.content) + '</div>';
       html += '</details>';
     } else {
       html += '<details>';
       html += '<summary class="ai-details-summary">';
-      html += '<span class="ai-badge ai-badge-' + cat + '">' + esc(ev.label) + '</span>';
+      html += '<span class="ai-badge ai-badge-' + escAttr(cat) + '">' + esc(ev.label) + '</span>';
       html += '<span class="ai-system-text">' + excerpt(ev.content, 100) + '</span>';
       html += '</summary>';
       html += '<div class="ai-system-text ai-system-detail">' + esc(ev.content) + '</div>';
@@ -173,19 +257,31 @@
     return html;
   }
 
-  function appendAssistantDelta(container, ev) {
-    if (!ev || !ev.delta || ev.category !== 'assistant') {
+  function appendDelta(container, ev) {
+    if (!ev || !ev.delta || (ev.category !== 'assistant' && ev.category !== 'thinking')) {
       return false;
     }
-    const assistantBodies = container.querySelectorAll('.ai-ev[data-category="assistant"] .ai-msg-content-assistant');
-    if (!assistantBodies || assistantBodies.length === 0) {
+    const previousEvent = container.lastElementChild;
+    if (!previousEvent || previousEvent.getAttribute('data-category') !== ev.category) {
       return false;
     }
-    const last = assistantBodies[assistantBodies.length - 1];
-    const previousMd = last.getAttribute('data-md') || '';
-    const mergedMd = previousMd + (ev.content || '');
-    last.setAttribute('data-md', mergedMd);
-    last.innerHTML = mdToHtml(mergedMd);
+    const selector = ev.category === 'assistant'
+      ? '.ai-msg-content-assistant'
+      : '.ai-thinking-text';
+    const last = previousEvent.querySelector(selector);
+    if (!last) {
+      return false;
+    }
+    if (ev.category === 'assistant') {
+      const previousMd = last.getAttribute('data-md') || '';
+      const mergedMd = previousMd + (ev.content || '');
+      last.setAttribute('data-md', mergedMd);
+      last.innerHTML = mdToHtml(mergedMd);
+    } else {
+      const mergedText = (last.getAttribute('data-content') || '') + (ev.content || '');
+      last.setAttribute('data-content', mergedText);
+      last.textContent = mergedText;
+    }
     return true;
   }
 
@@ -200,15 +296,15 @@
     let html = '';
     for (let i = 0; i < approvals.length; i++) {
       const approval = approvals[i];
-      html += '<div class="ai-approval-card" data-approval-id="' + esc(approval.id) + '">';
+      html += '<div class="ai-approval-card" data-approval-id="' + escAttr(approval.id) + '">';
       html += '<strong>Approval required:</strong> ' + esc(approval.toolName);
       html += ' <span class="ai-approval-summary">- ' + esc(approval.inputSummary) + '</span>';
       html += '<div class="actions">';
       html += '<button type="button" class="jenkins-button jenkins-button--primary ai-approve-btn" '
-            + 'data-url="' + esc(approveUrl) + '" data-id="' + esc(approval.id) + '">Approve</button>';
+            + 'data-url="' + escAttr(approveUrl) + '" data-id="' + escAttr(approval.id) + '">Approve</button>';
       html += '<input type="text" placeholder="reason (optional)" class="ai-approval-reason ai-deny-reason-input jenkins-input" />';
       html += '<button type="button" class="jenkins-button jenkins-button--primary ai-deny-btn" '
-            + 'data-url="' + esc(denyUrl) + '" data-id="' + esc(approval.id) + '">Deny</button>';
+            + 'data-url="' + escAttr(denyUrl) + '" data-id="' + escAttr(approval.id) + '">Deny</button>';
       html += '</div></div>';
     }
     container.innerHTML = html;
@@ -232,18 +328,12 @@
     const buttons = card.querySelectorAll('button');
     buttons.forEach(function(b) { b.disabled = true; });
 
-    const params = new URLSearchParams();
-    params.append('id', id);
-    if (reason != null && reason !== '') {
-      params.append('reason', reason);
-    }
-
     const headers = { 'Accept': 'application/json' };
     if (crumbRequestField && crumbValue) {
       headers[crumbRequestField] = crumbValue;
     }
 
-    fetch(url + '?' + params.toString(), {
+    fetch(buildApprovalUrl(url, id, reason), {
       method: 'POST',
       credentials: 'same-origin',
       headers: headers
@@ -364,13 +454,19 @@
         if (events.length > 0) {
           let html = '';
           for (let i = 0; i < events.length; i++) {
-            if (appendAssistantDelta(container, events[i])) {
+            if (events[i].delta && html) {
+              container.insertAdjacentHTML('beforeend', html);
+              html = '';
+            }
+            if (appendDelta(container, events[i])) {
               continue;
             }
             html += renderEvent(events[i]);
             eventCount++;
           }
-          container.insertAdjacentHTML('beforeend', html);
+          if (html) {
+            container.insertAdjacentHTML('beforeend', html);
+          }
           if (shouldScroll) {
             container.scrollTop = container.scrollHeight;
           }
@@ -423,17 +519,28 @@
     const details = document.querySelectorAll('.ai-invocation-details');
     if (details.length > 0) {
       const conv = details[0].querySelector('.ai-conv');
-        if (conv) {
-            conv.classList.remove("jenkins-hidden");
-        }
-        for (let j = 0; j < details.length; j++) {
-            const title = details[j].querySelector('.ai-invocation-title');
-            const conversation = details[0].querySelector('.ai-conv');
-            title.addEventListener('click', function (event) {
-                conversation.classList.toggle('jenkins-hidden');
-             });
-        }
+      if (conv) {
+        conv.classList.remove('jenkins-hidden');
+      }
+      for (let j = 0; j < details.length; j++) {
+        const title = details[j].querySelector('.ai-invocation-title');
+        const conversation = details[j].querySelector('.ai-conv');
+        title.addEventListener('click', function () {
+          conversation.classList.toggle('jenkins-hidden');
+        });
+      }
     }
+  }
+
+  if (typeof module === 'object' && module.exports) {
+    module.exports = {
+      appendDelta: appendDelta,
+      buildApprovalUrl: buildApprovalUrl,
+      isSafeUrl: isSafeUrl,
+      renderEvent: renderEvent,
+      sanitizeHtml: sanitizeHtml
+    };
+    return;
   }
 
   if (document.readyState === 'loading') {

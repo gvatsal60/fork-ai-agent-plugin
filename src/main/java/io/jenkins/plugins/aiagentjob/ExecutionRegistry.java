@@ -47,37 +47,45 @@ public final class ExecutionRegistry {
         private final Map<String, PendingApproval> pendingApprovals = new ConcurrentHashMap<>();
         private final Map<String, CompletableFuture<ApprovalDecision>> decisions =
                 new ConcurrentHashMap<>();
+        private String cancellationReason;
 
-        PendingApproval createPendingApproval(
+        synchronized PendingApproval createPendingApproval(
                 String toolCallId, String toolName, String inputSummary) {
             String id = UUID.randomUUID().toString();
             PendingApproval pending =
                     new PendingApproval(id, toolCallId, toolName, inputSummary, Instant.now());
-            pendingApprovals.put(id, pending);
-            decisions.put(id, new CompletableFuture<>());
+            CompletableFuture<ApprovalDecision> decision = new CompletableFuture<>();
+            decisions.put(id, decision);
+            if (cancellationReason == null) {
+                pendingApprovals.put(id, pending);
+            } else {
+                decision.complete(ApprovalDecision.denied(cancellationReason));
+            }
             return pending;
         }
 
-        ApprovalDecision awaitDecision(PendingApproval pendingApproval, Duration timeout) {
+        ApprovalDecision awaitDecision(PendingApproval pendingApproval, Duration timeout)
+                throws InterruptedException {
             CompletableFuture<ApprovalDecision> future = decisions.get(pendingApproval.getId());
             if (future == null) {
                 return ApprovalDecision.denied("approval request disappeared");
             }
             try {
-                ApprovalDecision decision = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-                pendingApprovals.remove(pendingApproval.getId());
-                decisions.remove(pendingApproval.getId());
-                return decision;
+                return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return ApprovalDecision.denied("interrupted while waiting for approval");
+                future.complete(ApprovalDecision.denied("interrupted while waiting for approval"));
+                throw e;
             } catch (ExecutionException e) {
                 return ApprovalDecision.denied("approval failed: " + e.getMessage());
             } catch (TimeoutException e) {
-                pendingApprovals.remove(pendingApproval.getId());
-                decisions.remove(pendingApproval.getId());
-                return ApprovalDecision.denied(
-                        "approval timed out after " + timeout.toSeconds() + "s");
+                ApprovalDecision timedOut =
+                        ApprovalDecision.denied(
+                                "approval timed out after " + timeout.toSeconds() + "s");
+                future.complete(timedOut);
+                return future.getNow(timedOut);
+            } finally {
+                pendingApprovals.remove(pendingApproval.getId(), pendingApproval);
+                decisions.remove(pendingApproval.getId(), future);
             }
         }
 
@@ -95,7 +103,6 @@ public final class ExecutionRegistry {
             boolean completed = future.complete(ApprovalDecision.approved());
             if (completed) {
                 pendingApprovals.remove(id);
-                decisions.remove(id);
             }
             return completed;
         }
@@ -108,9 +115,18 @@ public final class ExecutionRegistry {
             boolean completed = future.complete(ApprovalDecision.denied(reason));
             if (completed) {
                 pendingApprovals.remove(id);
-                decisions.remove(id);
             }
             return completed;
+        }
+
+        synchronized void cancelPendingApprovals(String reason) {
+            ApprovalDecision cancelled = ApprovalDecision.denied(reason);
+            cancellationReason = cancelled.getReason();
+            for (Map.Entry<String, CompletableFuture<ApprovalDecision>> entry :
+                    decisions.entrySet()) {
+                entry.getValue().complete(cancelled);
+                pendingApprovals.remove(entry.getKey());
+            }
         }
     }
 

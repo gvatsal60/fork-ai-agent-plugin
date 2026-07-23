@@ -7,6 +7,9 @@ import io.jenkins.plugins.aiagentjob.LogFormatUtils;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Format-specific log classification for Claude Code stream-json output. Handles content arrays
  * (tool_use, tool_result, thinking, text) and stream_event deltas.
@@ -23,6 +26,12 @@ public final class ClaudeCodeLogFormat implements AiAgentLogFormat {
 
     @Override
     public AiAgentLogParser.ParsedLine classify(long lineNumber, JSONObject json) {
+        List<AiAgentLogParser.ParsedLine> parsed = classifyAll(lineNumber, json);
+        return parsed == null || parsed.isEmpty() ? null : parsed.get(0);
+    }
+
+    @Override
+    public List<AiAgentLogParser.ParsedLine> classifyAll(long lineNumber, JSONObject json) {
         String type = LogFormatUtils.firstNonEmpty(json, "type", "event", "kind", "subtype");
         String typeLower = LogFormatUtils.normalize(type);
 
@@ -32,8 +41,12 @@ public final class ClaudeCodeLogFormat implements AiAgentLogFormat {
             if (message != null) {
                 JSONArray contentArr = message.optJSONArray("content");
                 if (contentArr != null && contentArr.size() > 0) {
-                    return classifyContentArray(
-                            lineNumber, typeLower, contentArr, json.toString(2));
+                    return classifyContentArrayAll(
+                            lineNumber,
+                            typeLower,
+                            message.optString("id", ""),
+                            contentArr,
+                            json.toString(2));
                 }
             }
         }
@@ -42,7 +55,7 @@ public final class ClaudeCodeLogFormat implements AiAgentLogFormat {
         if (typeLower.equals("stream_event")) {
             JSONObject event = json.optJSONObject("event");
             if (event != null) {
-                return classifyStreamEvent(lineNumber, event, json.toString(2));
+                return List.of(classifyStreamEvent(lineNumber, event, json.toString(2)));
             }
         }
 
@@ -52,73 +65,120 @@ public final class ClaudeCodeLogFormat implements AiAgentLogFormat {
 
     public static AiAgentLogParser.ParsedLine classifyContentArray(
             long lineNumber, String parentType, JSONArray contentArr, String rawDetails) {
-        // Scan for tool_use first
+        return classifyContentArrayAll(lineNumber, parentType, "", contentArr, rawDetails).get(0);
+    }
+
+    private static List<AiAgentLogParser.ParsedLine> classifyContentArrayAll(
+            long lineNumber,
+            String parentType,
+            String messageId,
+            JSONArray contentArr,
+            String rawDetails) {
+        List<AiAgentLogParser.ParsedLine> parsed = new ArrayList<>();
+        StringBuilder text = new StringBuilder();
+        String category = parentType.equals("assistant") ? "assistant" : "user";
+        int textStartIndex = -1;
+
         for (int i = 0; i < contentArr.size(); i++) {
             Object obj = contentArr.get(i);
             if (!(obj instanceof JSONObject)) continue;
             JSONObject ci = (JSONObject) obj;
             String ciType = LogFormatUtils.normalize(ci.optString("type"));
 
+            if (ciType.equals("text")) {
+                String value = ci.optString("text", "");
+                if (!value.isEmpty()) {
+                    if (textStartIndex < 0) textStartIndex = i;
+                    if (text.length() > 0) text.append('\n');
+                    text.append(value);
+                }
+                continue;
+            }
+
+            addPendingText(
+                    parsed,
+                    lineNumber,
+                    category,
+                    text,
+                    rawDetails,
+                    contentKey(messageId, textStartIndex, i - 1, "text"));
+            textStartIndex = -1;
+
             if (ciType.equals("tool_use")) {
                 String toolName = LogFormatUtils.firstNonEmpty(ci, "name");
                 String toolCallId = LogFormatUtils.firstNonEmpty(ci, "id");
                 String toolInput =
                         LogFormatUtils.extractToolInput(ci.optJSONObject("input"), toolName);
-                return AiAgentLogParser.ParsedLine.toolCall(
-                        lineNumber, toolName, toolInput, rawDetails, toolCallId);
-            }
-        }
-        // Then tool_result blocks wrapped in Claude "user" turns
-        for (int i = 0; i < contentArr.size(); i++) {
-            Object obj = contentArr.get(i);
-            if (!(obj instanceof JSONObject)) continue;
-            JSONObject ci = (JSONObject) obj;
-            if ("tool_result".equals(LogFormatUtils.normalize(ci.optString("type")))) {
+                parsed.add(
+                        AiAgentLogParser.ParsedLine.toolCall(
+                                        lineNumber, toolName, toolInput, rawDetails, toolCallId)
+                                .withDeduplicationKey(
+                                        toolCallId.isEmpty()
+                                                ? contentKey(messageId, i, i, "tool-use")
+                                                : "claude-tool-use:" + toolCallId));
+            } else if (ciType.equals("tool_result")) {
                 String toolCallId =
                         LogFormatUtils.firstNonEmpty(ci, "tool_use_id", "tool_call_id", "id");
                 String toolName = LogFormatUtils.firstNonEmpty(ci, "tool_name", "name");
                 String toolOutput = LogFormatUtils.extractToolResultContent(ci);
-                if (toolOutput.isEmpty()) {
-                    return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
+                if (!toolOutput.isEmpty()) {
+                    parsed.add(
+                            AiAgentLogParser.ParsedLine.toolResult(
+                                            lineNumber,
+                                            toolName,
+                                            toolOutput,
+                                            rawDetails,
+                                            toolCallId)
+                                    .withDeduplicationKey(
+                                            toolCallId.isEmpty()
+                                                    ? contentKey(messageId, i, i, "tool-result")
+                                                    : "claude-tool-result:" + toolCallId));
                 }
-                return AiAgentLogParser.ParsedLine.toolResult(
-                        lineNumber, toolName, toolOutput, rawDetails, toolCallId);
-            }
-        }
-        // Then thinking
-        for (int i = 0; i < contentArr.size(); i++) {
-            Object obj = contentArr.get(i);
-            if (!(obj instanceof JSONObject)) continue;
-            JSONObject ci = (JSONObject) obj;
-            if ("thinking".equals(LogFormatUtils.normalize(ci.optString("type")))) {
+            } else if (ciType.equals("thinking")) {
                 String thinking = LogFormatUtils.firstNonEmpty(ci, "thinking");
-                return AiAgentLogParser.ParsedLine.thinking(lineNumber, thinking, rawDetails);
-            }
-        }
-        // Default: extract all text content
-        StringBuilder textBuilder = new StringBuilder();
-        for (int i = 0; i < contentArr.size(); i++) {
-            Object obj = contentArr.get(i);
-            if (!(obj instanceof JSONObject)) continue;
-            JSONObject ci = (JSONObject) obj;
-            if ("text".equals(ci.optString("type"))) {
-                String t = ci.optString("text", "");
-                if (!t.isEmpty()) {
-                    if (textBuilder.length() > 0) textBuilder.append('\n');
-                    textBuilder.append(t);
+                if (!thinking.isEmpty()) {
+                    parsed.add(
+                            AiAgentLogParser.ParsedLine.thinking(lineNumber, thinking, rawDetails)
+                                    .withDeduplicationKey(contentKey(messageId, i, i, "thinking")));
                 }
             }
         }
-        String cat = parentType.equals("assistant") ? "assistant" : "user";
-        if (textBuilder.length() == 0) {
-            return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
-        }
-        return AiAgentLogParser.ParsedLine.message(
+        addPendingText(
+                parsed,
                 lineNumber,
-                cat,
-                LogFormatUtils.capitalize(cat),
-                textBuilder.toString(),
-                rawDetails);
+                category,
+                text,
+                rawDetails,
+                contentKey(messageId, textStartIndex, contentArr.size() - 1, "text"));
+        if (parsed.isEmpty()) {
+            parsed.add(AiAgentLogParser.ParsedLine.raw(lineNumber, ""));
+        }
+        return parsed;
+    }
+
+    private static void addPendingText(
+            List<AiAgentLogParser.ParsedLine> parsed,
+            long lineNumber,
+            String category,
+            StringBuilder text,
+            String rawDetails,
+            String deduplicationKey) {
+        if (text.length() == 0) return;
+        parsed.add(
+                AiAgentLogParser.ParsedLine.message(
+                                lineNumber,
+                                category,
+                                LogFormatUtils.capitalize(category),
+                                text.toString(),
+                                rawDetails)
+                        .withDeduplicationKey(deduplicationKey));
+        text.setLength(0);
+    }
+
+    private static String contentKey(
+            String messageId, int startIndex, int endIndex, String blockType) {
+        if (messageId == null || messageId.isEmpty() || startIndex < 0) return null;
+        return "claude-content:" + messageId + ':' + startIndex + ':' + endIndex + ':' + blockType;
     }
 
     public static AiAgentLogParser.ParsedLine classifyStreamEvent(
@@ -132,20 +192,30 @@ public final class ClaudeCodeLogFormat implements AiAgentLogFormat {
             if (source != null) {
                 String blockType = LogFormatUtils.normalize(source.optString("type"));
                 if (blockType.contains("thinking")) {
-                    return AiAgentLogParser.ParsedLine.thinking(
-                            lineNumber,
-                            LogFormatUtils.firstNonEmpty(source, "thinking", "text"),
-                            rawDetails);
+                    String thinking = source.optString("thinking", source.optString("text", ""));
+                    return thinking.isEmpty()
+                            ? AiAgentLogParser.ParsedLine.raw(lineNumber, "")
+                            : AiAgentLogParser.ParsedLine.thinking(
+                                    lineNumber,
+                                    thinking,
+                                    rawDetails,
+                                    eventType.equals("content_block_delta"));
                 }
                 if (blockType.contains("text")) {
+                    String text = source.optString("text", "");
+                    if (text.isEmpty()) {
+                        return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
+                    }
                     return AiAgentLogParser.ParsedLine.message(
                             lineNumber,
                             "assistant",
                             "Assistant",
-                            LogFormatUtils.firstNonEmpty(source, "text"),
-                            rawDetails);
+                            text,
+                            rawDetails,
+                            eventType.equals("content_block_delta"));
                 }
             }
+            return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
         }
         if (eventType.equals("message_start")) {
             JSONObject message = event.optJSONObject("message");
@@ -156,6 +226,13 @@ public final class ClaudeCodeLogFormat implements AiAgentLogFormat {
                             lineNumber, "System", "Model: " + model, rawDetails);
                 }
             }
+            return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
+        }
+        if (eventType.equals("content_block_stop")
+                || eventType.equals("message_delta")
+                || eventType.equals("message_stop")
+                || eventType.equals("ping")) {
+            return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
         }
         return AiAgentLogParser.ParsedLine.system(
                 lineNumber, "Stream event", eventType, rawDetails);

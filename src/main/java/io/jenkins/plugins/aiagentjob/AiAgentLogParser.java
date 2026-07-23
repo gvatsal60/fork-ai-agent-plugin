@@ -2,7 +2,6 @@ package io.jenkins.plugins.aiagentjob;
 
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
 
-import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -13,8 +12,10 @@ import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Parses JSONL output from AI agents into classified {@link EventView} objects.
@@ -49,34 +50,37 @@ public final class AiAgentLogParser {
             return Collections.emptyList();
         }
         List<EventView> events = new ArrayList<>();
-        String lastAssistantContent = "";
+        EventView lastAssistantEvent = null;
+        ParseState parseState = new ParseState();
         try (BufferedReader reader =
                 Files.newBufferedReader(rawLogFile.toPath(), StandardCharsets.UTF_8)) {
             String line;
             long idx = 0;
             while ((line = reader.readLine()) != null) {
                 idx++;
-                EventView ev = parseLine(idx, line, format).toEventView();
-                if (ev.isEmpty()) continue;
+                for (ParsedLine parsedLine : parseLines(idx, line, format)) {
+                    if (!parseState.shouldEmit(parsedLine)) continue;
+                    EventView ev = parsedLine.toEventView();
+                    if (ev.isEmpty()) continue;
 
-                if (mergeAssistantDelta(events, ev)) {
-                    EventView merged = events.get(events.size() - 1);
-                    lastAssistantContent = merged.getContent();
-                    continue;
-                }
+                    if (mergeDelta(events, ev)) {
+                        if ("assistant".equals(ev.getCategory())) {
+                            lastAssistantEvent = events.get(events.size() - 1);
+                        }
+                        continue;
+                    }
 
-                if ("assistant".equals(ev.getCategory()) && !ev.getContent().isEmpty()) {
-                    lastAssistantContent = ev.getContent();
-                }
+                    if ("assistant".equals(ev.getCategory()) && !ev.getContent().isEmpty()) {
+                        lastAssistantEvent = ev;
+                    }
 
-                if ("result".equals(ev.getCategory())
-                        && !ev.getContent().isEmpty()
-                        && !lastAssistantContent.isEmpty()
-                        && ev.getContent().contains(lastAssistantContent)) {
-                    continue;
-                }
+                    if ("result".equals(ev.getCategory())
+                            && !ev.getContent().isEmpty()
+                            && lastAssistantEvent != null
+                            && ev.getContent().contains(lastAssistantEvent.getContent())) {
+                        continue;
+                    }
 
-                if (!ev.isEmpty()) {
                     events.add(ev);
                 }
             }
@@ -84,32 +88,22 @@ public final class AiAgentLogParser {
         return events;
     }
 
-    private static boolean mergeAssistantDelta(List<EventView> events, EventView ev) {
-        if (!ev.isDelta() || !"assistant".equals(ev.getCategory()) || ev.getContent().isEmpty()) {
+    private static boolean mergeDelta(List<EventView> events, EventView ev) {
+        if (!ev.isDelta() || ev.getContent().isEmpty()) {
+            return false;
+        }
+        if (!"assistant".equals(ev.getCategory()) && !"thinking".equals(ev.getCategory())) {
             return false;
         }
         if (events.isEmpty()) {
             return false;
         }
         EventView previous = events.get(events.size() - 1);
-        if (!"assistant".equals(previous.getCategory())) {
+        if (!ev.getCategory().equals(previous.getCategory())) {
             return false;
         }
 
-        String mergedContent = previous.getContent() + ev.getContent();
-        String mergedRaw = previous.getRawDetails() + "\n" + ev.getRawDetails();
-        EventView merged =
-                new EventView(
-                        previous.getId(),
-                        previous.getCategory(),
-                        previous.getLabel(),
-                        mergedContent,
-                        previous.getToolInput(),
-                        previous.getToolOutput(),
-                        mergedRaw,
-                        ev.getTimestamp(),
-                        false);
-        events.set(events.size() - 1, merged);
+        previous.appendDelta(ev);
         return true;
     }
 
@@ -118,33 +112,43 @@ public final class AiAgentLogParser {
     }
 
     public static ParsedLine parseLine(long lineNumber, String line, AiAgentLogFormat format) {
+        List<ParsedLine> parsedLines = parseLines(lineNumber, line, format);
+        return parsedLines.isEmpty() ? ParsedLine.raw(lineNumber, "") : parsedLines.get(0);
+    }
+
+    static List<ParsedLine> parseLines(long lineNumber, String line, AiAgentLogFormat format) {
         if (line == null) {
-            return ParsedLine.raw(lineNumber, "");
+            return List.of(ParsedLine.raw(lineNumber, ""));
         }
         String trimmed = line.trim();
         if (trimmed.isEmpty()) {
-            return ParsedLine.raw(lineNumber, "");
+            return List.of(ParsedLine.raw(lineNumber, ""));
         }
 
         JSONObject json = tryParseJson(trimmed);
         if (json == null) {
-            return ParsedLine.raw(lineNumber, trimmed);
+            return List.of(ParsedLine.raw(lineNumber, trimmed));
         }
         return classifyJson(lineNumber, json, format);
     }
 
-    private static ParsedLine classifyJson(
+    private static List<ParsedLine> classifyJson(
             long lineNumber, JSONObject json, AiAgentLogFormat format) {
         // 1) Try the handler-specific format first
         if (format != null) {
-            ParsedLine result = format.classify(lineNumber, json);
+            List<ParsedLine> result = format.classifyAll(lineNumber, json);
             if (result != null) {
                 return result;
             }
         }
 
+        List<ParsedLine> claudeResult = ClaudeCodeLogFormat.INSTANCE.classifyAll(lineNumber, json);
+        if (claudeResult != null) {
+            return claudeResult;
+        }
+
         // 2) Shared format: common types across multiple agents
-        return classifySharedFormat(lineNumber, json);
+        return List.of(classifySharedFormat(lineNumber, json));
     }
 
     /**
@@ -225,11 +229,6 @@ public final class AiAgentLogParser {
         if (typeLower.equals("assistant") || typeLower.equals("user")) {
             JSONObject message = json.optJSONObject("message");
             if (message != null) {
-                JSONArray contentArr = message.optJSONArray("content");
-                if (contentArr != null && contentArr.size() > 0) {
-                    return ClaudeCodeLogFormat.classifyContentArray(
-                            lineNumber, typeLower, contentArr, rawDetails);
-                }
                 String msgText = LogFormatUtils.extractText(message);
                 String cat = typeLower.equals("assistant") ? "assistant" : "user";
                 return ParsedLine.message(
@@ -321,6 +320,18 @@ public final class AiAgentLogParser {
         }
     }
 
+    static final class ParseState {
+        private final Map<String, String> fingerprints = new HashMap<>();
+
+        boolean shouldEmit(ParsedLine parsedLine) {
+            if (parsedLine.deduplicationKey == null || parsedLine.deduplicationKey.isEmpty()) {
+                return true;
+            }
+            String fingerprint = parsedLine.deduplicationFingerprint();
+            return !fingerprint.equals(fingerprints.put(parsedLine.deduplicationKey, fingerprint));
+        }
+    }
+
     // ---- Data classes ----
 
     public static final class ParsedLine {
@@ -334,6 +345,11 @@ public final class AiAgentLogParser {
         private final String rawDetails;
         private final String toolCallId;
         private final boolean delta;
+
+        // Ephemeral parser identity, not a credential or persisted value.
+        @SuppressWarnings("lgtm[jenkins/plaintext-storage]")
+        private final String deduplicationKey;
+
         private final Instant timestamp;
 
         private ParsedLine(
@@ -347,6 +363,34 @@ public final class AiAgentLogParser {
                 String rawDetails,
                 String toolCallId,
                 boolean delta) {
+            this(
+                    id,
+                    category,
+                    label,
+                    content,
+                    toolInput,
+                    toolOutput,
+                    toolName,
+                    rawDetails,
+                    toolCallId,
+                    delta,
+                    null,
+                    Instant.now());
+        }
+
+        private ParsedLine(
+                long id,
+                String category,
+                String label,
+                String content,
+                String toolInput,
+                String toolOutput,
+                String toolName,
+                String rawDetails,
+                String toolCallId,
+                boolean delta,
+                String deduplicationKey,
+                Instant timestamp) {
             this.id = id;
             this.category = category;
             this.label = label;
@@ -357,7 +401,8 @@ public final class AiAgentLogParser {
             this.rawDetails = rawDetails;
             this.toolCallId = toolCallId;
             this.delta = delta;
-            this.timestamp = Instant.now();
+            this.deduplicationKey = deduplicationKey;
+            this.timestamp = timestamp;
         }
 
         public static ParsedLine raw(long id, String line) {
@@ -393,8 +438,13 @@ public final class AiAgentLogParser {
         }
 
         public static ParsedLine thinking(long id, String content, String rawDetails) {
+            return thinking(id, content, rawDetails, false);
+        }
+
+        public static ParsedLine thinking(
+                long id, String content, String rawDetails, boolean delta) {
             return new ParsedLine(
-                    id, "thinking", "Thinking", content, "", "", "", rawDetails, null, false);
+                    id, "thinking", "Thinking", content, "", "", "", rawDetails, null, delta);
         }
 
         public static ParsedLine toolCall(
@@ -455,6 +505,35 @@ public final class AiAgentLogParser {
             return label;
         }
 
+        public ParsedLine withDeduplicationKey(String key) {
+            if (key == null || key.isEmpty()) return this;
+            return new ParsedLine(
+                    id,
+                    category,
+                    label,
+                    content,
+                    toolInput,
+                    toolOutput,
+                    toolName,
+                    rawDetails,
+                    toolCallId,
+                    delta,
+                    key,
+                    timestamp);
+        }
+
+        private String deduplicationFingerprint() {
+            return category
+                    + '\0'
+                    + content
+                    + '\0'
+                    + toolInput
+                    + '\0'
+                    + toolOutput
+                    + '\0'
+                    + toolCallId;
+        }
+
         EventView toEventView() {
             return new EventView(
                     id,
@@ -479,12 +558,12 @@ public final class AiAgentLogParser {
         private final long id;
         private final String category;
         private final String label;
-        private final String content;
+        private final StringBuilder content;
         private final String toolInput;
         private final String toolOutput;
-        private final String rawDetails;
-        private final Instant timestamp;
-        private final boolean delta;
+        private final StringBuilder rawDetails;
+        private Instant timestamp;
+        private boolean delta;
 
         EventView(
                 long id,
@@ -499,10 +578,10 @@ public final class AiAgentLogParser {
             this.id = id;
             this.category = category;
             this.label = label;
-            this.content = content;
+            this.content = new StringBuilder(content);
             this.toolInput = toolInput;
             this.toolOutput = toolOutput;
-            this.rawDetails = rawDetails;
+            this.rawDetails = new StringBuilder(rawDetails);
             this.timestamp = timestamp;
             this.delta = delta;
         }
@@ -522,7 +601,7 @@ public final class AiAgentLogParser {
 
         /** Full text content for messages, results, and thinking. */
         public String getContent() {
-            return content;
+            return content.toString();
         }
 
         /** Tool input: command text, file path, etc. */
@@ -537,7 +616,7 @@ public final class AiAgentLogParser {
 
         /** Raw JSON for the detail drill-down. */
         public String getRawDetails() {
-            return rawDetails;
+            return rawDetails.toString();
         }
 
         public Instant getTimestamp() {
@@ -554,8 +633,9 @@ public final class AiAgentLogParser {
 
         /** One-line summary for progressive events API backwards compat. */
         public String getSummary() {
-            if (!content.isEmpty()) {
-                String compact = content.replaceAll("\\s+", " ").trim();
+            String contentText = getContent();
+            if (!contentText.isEmpty()) {
+                String compact = contentText.replaceAll("\\s+", " ").trim();
                 if (compact.length() > 180) compact = compact.substring(0, 177) + "...";
                 return label + ": " + compact;
             }
@@ -569,7 +649,7 @@ public final class AiAgentLogParser {
 
         public boolean isEmpty() {
             if ("raw".equals(category)) {
-                return content == null || content.trim().isEmpty();
+                return content.toString().trim().isEmpty();
             }
             return false;
         }
@@ -589,7 +669,17 @@ public final class AiAgentLogParser {
 
         /** Returns content converted from markdown to basic HTML for display in Jelly. */
         public String getContentHtml() {
-            return markdownToHtml(content);
+            return markdownToHtml(getContent());
+        }
+
+        private void appendDelta(EventView event) {
+            content.append(event.content);
+            if (!rawDetails.isEmpty() && !event.rawDetails.isEmpty()) {
+                rawDetails.append('\n');
+            }
+            rawDetails.append(event.rawDetails);
+            timestamp = event.timestamp;
+            delta = false;
         }
 
         static String markdownToHtml(String md) {

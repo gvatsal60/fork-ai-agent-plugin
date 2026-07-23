@@ -41,8 +41,6 @@ public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
         command.add("--verbose");
         if (config.isYoloMode()) {
             command.add("--dangerously-skip-permissions");
-        } else if (config.isRequireApprovals()) {
-            command.add("--permission-mode=default");
         }
         String model = Util.fixEmptyAndTrim(config.getModel());
         if (model != null) {

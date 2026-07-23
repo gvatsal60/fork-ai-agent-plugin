@@ -31,11 +31,34 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
 
     public abstract String getDefaultApiKeyEnvVar();
 
+    /** Rejects unsupported execution settings before any process or temporary file is created. */
+    public void validateExecution(AiAgentConfiguration config) {
+        if (!config.isRequireApprovals() || config.isYoloMode()) {
+            return;
+        }
+        String commandOverride = config.getCommandOverride();
+        if (commandOverride != null && !commandOverride.trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Manual approvals cannot be used with a command override because Jenkins "
+                            + "has no bidirectional approval channel for that process.");
+        }
+        if (!supportsManualApprovals()) {
+            throw new IllegalArgumentException(
+                    "Manual approvals require an ACP-capable agent. Disable manual approvals or "
+                            + "use OpenCode.");
+        }
+    }
+
+    /** Whether this handler provides a bidirectional Jenkins approval channel. */
+    public boolean supportsManualApprovals() {
+        return false;
+    }
+
     public abstract List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt);
 
     /**
-     * Returns an ACP server command when this agent needs a bidirectional approval channel, or
-     * {@code null} when its normal command handles approvals directly.
+     * Returns an ACP server command for a bidirectional approval channel, or {@code null} when
+     * manual approvals are unsupported.
      */
     public AcpExecutionSpec buildAcpExecution(AiAgentConfiguration config) {
         return null;

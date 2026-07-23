@@ -36,7 +36,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void approve_resolvesDecision() {
+    void approve_resolvesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "ls");
@@ -59,7 +59,20 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void deny_resolvesDecision() {
+    void approveBeforeAwait_resolvesDecision() throws Exception {
+        ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
+        ExecutionRegistry.PendingApproval pending =
+                live.createPendingApproval("tc-1", "bash", "ls");
+
+        assertTrue(live.approve(pending.getId()));
+
+        ExecutionRegistry.ApprovalDecision decision =
+                live.awaitDecision(pending, Duration.ofSeconds(1));
+        assertTrue(decision.isApproved(), "Early approval should remain available to the executor");
+    }
+
+    @Test
+    void deny_resolvesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "rm -rf /");
@@ -82,7 +95,7 @@ class ExecutionRegistryTest {
     }
 
     @Test
-    void timeout_deniesDecision() {
+    void timeout_deniesDecision() throws Exception {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         ExecutionRegistry.PendingApproval pending =
                 live.createPendingApproval("tc-1", "bash", "ls");
@@ -94,6 +107,21 @@ class ExecutionRegistryTest {
                 decision.getReason().toLowerCase().contains("timed out")
                         || decision.getReason().toLowerCase().contains("timeout"),
                 "Reason should mention timed out");
+    }
+
+    @Test
+    void cancellationBeforeApprovalCreation_deniesNewApproval() throws Exception {
+        ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
+        live.cancelPendingApprovals("agent process exited while waiting for approval");
+        ExecutionRegistry.PendingApproval pending =
+                live.createPendingApproval("tc-1", "bash", "ls");
+
+        ExecutionRegistry.ApprovalDecision decision =
+                live.awaitDecision(pending, Duration.ofSeconds(1));
+
+        assertFalse(decision.isApproved());
+        assertTrue(decision.getReason().contains("agent process exited"));
+        assertTrue(live.getPendingApprovals().isEmpty());
     }
 
     @Test
@@ -117,5 +145,25 @@ class ExecutionRegistryTest {
     void deny_returnsFalseForUnknownId() {
         ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
         assertFalse(live.deny("nonexistent-id", "reason"));
+    }
+
+    @Test
+    void cancelPendingApprovals_deniesWaitersAndClearsCards() throws Exception {
+        ExecutionRegistry.LiveExecution live = new ExecutionRegistry.LiveExecution();
+        ExecutionRegistry.PendingApproval first = live.createPendingApproval("tc-1", "bash", "ls");
+        ExecutionRegistry.PendingApproval second =
+                live.createPendingApproval("tc-2", "read", "README.md");
+
+        live.cancelPendingApprovals("build aborted");
+
+        assertTrue(live.getPendingApprovals().isEmpty());
+        ExecutionRegistry.ApprovalDecision firstDecision =
+                live.awaitDecision(first, Duration.ofSeconds(1));
+        ExecutionRegistry.ApprovalDecision secondDecision =
+                live.awaitDecision(second, Duration.ofSeconds(1));
+        assertFalse(firstDecision.isApproved());
+        assertFalse(secondDecision.isApproved());
+        assertEquals("build aborted", firstDecision.getReason());
+        assertEquals("build aborted", secondDecision.getReason());
     }
 }

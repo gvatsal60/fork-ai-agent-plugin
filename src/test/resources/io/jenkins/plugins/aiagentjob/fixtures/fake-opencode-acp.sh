@@ -28,7 +28,12 @@ while IFS= read -r request; do
 done
 printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"private-test-command","description":"control metadata"}]}}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"touch approved.txt","kind":"execute","status":"pending","rawInput":{"command":"touch approved.txt"}}}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"session-1","toolCall":{"toolCallId":"call-1","title":"touch approved.txt","kind":"execute","status":"pending","rawInput":{"command":"touch approved.txt"}},"options":[{"optionId":"once","name":"Allow once","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}'
+approval_input=${FAKE_ACP_SECRET_INPUT:-touch approved.txt}
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":\"permission-1\",\"method\":\"session/request_permission\",\"params\":{\"sessionId\":\"session-1\",\"toolCall\":{\"toolCallId\":\"call-1\",\"title\":\"touch approved.txt\",\"kind\":\"execute\",\"status\":\"pending\",\"rawInput\":{\"command\":\"$approval_input\"}},\"options\":[{\"optionId\":\"once\",\"name\":\"Allow once\",\"kind\":\"allow_once\"},{\"optionId\":\"reject\",\"name\":\"Reject\",\"kind\":\"reject_once\"}]}}"
+
+if test "${FAKE_ACP_EXIT_AFTER_PERMISSION:-}" = "1"; then
+  exit 23
+fi
 
 IFS= read -r approval_response
 printf '%s\n' "$approval_response" > approval-response.json

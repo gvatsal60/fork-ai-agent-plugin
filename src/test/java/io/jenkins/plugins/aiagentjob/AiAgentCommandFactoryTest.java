@@ -2,6 +2,7 @@ package io.jenkins.plugins.aiagentjob;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
@@ -71,17 +72,16 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
-    void claudeCode_approvalsMode() {
+    void claudeCode_manualApprovalsAreRejected() {
         AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
         project.setRequireApprovals(true);
 
-        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test prompt");
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test prompt"));
 
-        assertTrue(
-                cmd.contains("--permission-mode=default"), "Should have --permission-mode=default");
-        assertFalse(
-                cmd.contains("--dangerously-skip-permissions"),
-                "Should NOT have --dangerously-skip-permissions");
+        assertTrue(error.getMessage().contains("ACP-capable"));
     }
 
     @Test
@@ -156,6 +156,19 @@ class AiAgentCommandFactoryTest {
         assertTrue(cmd.indexOf("--sandbox") < cmd.indexOf("exec"), "--sandbox is a global flag");
         assertTrue(approvalIdx < cmd.indexOf("exec"), "--ask-for-approval is a global flag");
         assertFalse(cmd.contains("--full-auto"), "Should not use removed --full-auto flag");
+    }
+
+    @Test
+    void codex_manualApprovalsAreRejected() {
+        AiAgentBuilder project = createProject(new CodexAgentHandler());
+        project.setRequireApprovals(true);
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("does not expose"));
     }
 
     @Test
@@ -253,6 +266,19 @@ class AiAgentCommandFactoryTest {
         assertEquals("sonnet-4-thinking", cmd.get(modelIdx + 1));
     }
 
+    @Test
+    void cursorAgent_manualApprovalsAreRejected() {
+        AiAgentBuilder project = createProject(new CursorAgentHandler());
+        project.setRequireApprovals(true);
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("ACP-capable"));
+    }
+
     // ======================== OpenCode Command Tests ========================
 
     @Test
@@ -307,6 +333,20 @@ class AiAgentCommandFactoryTest {
         assertEquals("xhigh", execution.getReasoningEffort());
     }
 
+    @Test
+    void openCode_commandOverrideCannotUseManualApprovals() {
+        AiAgentBuilder project = createProject(new OpenCodeAgentHandler());
+        project.setRequireApprovals(true);
+        project.setCommandOverride("opencode acp --custom");
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("command override"));
+    }
+
     // ======================== Gemini CLI Command Tests ========================
 
     @Test
@@ -333,14 +373,16 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
-    void geminiCli_withApprovals() {
+    void geminiCli_manualApprovalsAreRejected() {
         AiAgentBuilder project = createProject(new GeminiCliAgentHandler());
         project.setRequireApprovals(true);
 
-        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
 
-        assertTrue(cmd.contains("--approval-mode"), "Should have --approval-mode");
-        assertTrue(cmd.contains("default"), "Should have default");
+        assertTrue(error.getMessage().contains("ACP-capable"));
     }
 
     @Test
@@ -425,26 +467,6 @@ class AiAgentCommandFactoryTest {
         assertEquals(2, vars.size());
         assertEquals("1", vars.get("A"));
         assertEquals("2", vars.get("B"));
-    }
-
-    // ======================== Command As String ========================
-
-    @Test
-    void commandAsString_joinsTokens() {
-        String result = AiAgentCommandFactory.commandAsString(List.of("echo", "hello", "world"));
-        assertEquals("echo hello world", result);
-    }
-
-    @Test
-    void commandAsString_quotesSpaces() {
-        String result = AiAgentCommandFactory.commandAsString(List.of("echo", "hello world"));
-        assertEquals("echo \"hello world\"", result);
-    }
-
-    @Test
-    void commandAsString_escapesQuotes() {
-        String result = AiAgentCommandFactory.commandAsString(List.of("echo", "say \"hi\""));
-        assertEquals("echo \"say \\\"hi\\\"\"", result);
     }
 
     // ======================== Model Without Value ========================

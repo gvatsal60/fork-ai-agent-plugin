@@ -34,6 +34,11 @@ public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
     }
 
     @Override
+    public boolean supportsManualApprovals() {
+        return true;
+    }
+
+    @Override
     public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
         List<String> command = new ArrayList<>();
         command.add("opencode");

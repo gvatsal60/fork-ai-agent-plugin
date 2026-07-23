@@ -41,9 +41,6 @@ public final class GeminiCliAgentHandler extends AiAgentTypeHandler {
         command.add("stream-json");
         if (config.isYoloMode()) {
             command.add("--yolo");
-        } else if (config.isRequireApprovals()) {
-            command.add("--approval-mode");
-            command.add("default");
         }
         String model = Util.fixEmptyAndTrim(config.getModel());
         if (model != null) {
