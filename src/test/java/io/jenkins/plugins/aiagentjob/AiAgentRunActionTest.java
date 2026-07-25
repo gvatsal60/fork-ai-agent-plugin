@@ -10,11 +10,13 @@ import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.security.csrf.DefaultCrumbIssuer;
 
+import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
 
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
+import org.htmlunit.html.HtmlElement;
 import org.htmlunit.html.HtmlPage;
 import org.htmlunit.html.HtmlScript;
 import org.junit.jupiter.api.Test;
@@ -350,6 +352,43 @@ class AiAgentRunActionTest {
         assertTrue(text.contains("AI Agent Conversation #1"));
         assertFalse(text.contains("Explain this repository in detail"));
         assertTrue(text.contains("Raw Log"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void conversationPage_showsCompletedCodexCommandInputAndOutput(JenkinsRule jenkins)
+            throws Exception {
+        String script = buildCatScript("codex-conversation.jsonl");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "test-codex-command-details",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setCommandOverride(script);
+                        });
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+
+        JenkinsRule.WebClient wc = jenkins.createWebClient();
+        wc.getOptions().setJavaScriptEnabled(false);
+        wc.getOptions().setCssEnabled(false);
+        HtmlPage page = wc.goTo(build.getUrl() + "ai-agent/conversation?invocation=1");
+        HtmlElement completedCommand =
+                page.getFirstByXPath(
+                        "//details[.//span[contains(@class, 'ai-badge-tool_result')]"
+                                + " and .//div[contains(., 'Tests: 8 passed')]]");
+
+        assertNotNull(completedCommand);
+        List<HtmlElement> labels =
+                completedCommand.getByXPath(".//div[contains(@class, 'ai-tool-section-label')]");
+        List<HtmlElement> contents =
+                completedCommand.getByXPath(".//div[contains(@class, 'ai-tool-section-content')]");
+        assertEquals(
+                List.of("Input", "Output"),
+                labels.stream().map(HtmlElement::getTextContent).toList());
+        assertEquals(2, contents.size());
+        assertTrue(contents.get(0).getTextContent().contains("npm test -- --runInBand"));
+        assertTrue(contents.get(1).getTextContent().contains("Tests: 8 passed"));
     }
 
     @Test

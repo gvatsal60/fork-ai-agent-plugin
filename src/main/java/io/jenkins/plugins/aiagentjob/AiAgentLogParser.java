@@ -465,13 +465,23 @@ public final class AiAgentLogParser {
 
         public static ParsedLine toolResult(
                 long id, String toolName, String toolOutput, String rawDetails, String toolCallId) {
+            return toolResult(id, toolName, "", toolOutput, rawDetails, toolCallId);
+        }
+
+        public static ParsedLine toolResult(
+                long id,
+                String toolName,
+                String toolInput,
+                String toolOutput,
+                String rawDetails,
+                String toolCallId) {
             String displayName = toolName.isEmpty() ? "Tool" : toolName;
             return new ParsedLine(
                     id,
                     "tool_result",
                     displayName,
                     "",
-                    "",
+                    toolInput,
                     toolOutput,
                     toolName,
                     rawDetails,

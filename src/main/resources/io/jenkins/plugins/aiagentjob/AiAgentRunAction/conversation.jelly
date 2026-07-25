@@ -110,18 +110,27 @@
                           <summary class="ai-tool-header ai-details-summary">
                             <span class="ai-badge ai-badge-tool_result">OUTPUT</span>
                             <span class="ai-tool-label">${ev.label}</span>
-                            <j:if test="${ev.toolOutput != ''}">
-                              <span class="ai-tool-input-preview ai-tool-output-preview">
-                                <j:choose>
-                                  <j:when test="${ev.toolOutput.length() > 80}">
-                                    ${ev.toolOutput.substring(0, 80)}...
-                                  </j:when>
-                                  <j:otherwise>${ev.toolOutput}</j:otherwise>
-                                </j:choose>
-                              </span>
-                            </j:if>
+                            <j:choose>
+                              <j:when test="${ev.toolInput != ''}">
+                                <span class="ai-tool-input-preview">${ev.toolInput}</span>
+                              </j:when>
+                              <j:when test="${ev.toolOutput != ''}">
+                                <span class="ai-tool-input-preview ai-tool-output-preview">
+                                  <j:choose>
+                                    <j:when test="${ev.toolOutput.length() > 80}">
+                                      ${ev.toolOutput.substring(0, 80)}...
+                                    </j:when>
+                                    <j:otherwise>${ev.toolOutput}</j:otherwise>
+                                  </j:choose>
+                                </span>
+                              </j:when>
+                            </j:choose>
                           </summary>
                           <div class="ai-tool-body">
+                            <j:if test="${ev.toolInput != ''}">
+                              <div class="ai-tool-section-label">Input</div>
+                              <div class="ai-tool-section-content">${ev.toolInput}</div>
+                            </j:if>
                             <j:if test="${ev.toolOutput != ''}">
                               <div class="ai-tool-section-label">Output</div>
                               <div class="ai-tool-section-content">${ev.toolOutput}</div>
