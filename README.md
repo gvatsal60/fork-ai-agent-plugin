@@ -58,8 +58,8 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
 2. Add/configure the **Run AI Agent** build step:
    - **Agent Type** — select the coding agent to run.
    - **Prompt** — the task to send to the agent.
-   - **Model** — optional model override (e.g., `claude-sonnet-4`).
-   - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`).
+   - **Model** — optional model override. Codex, Claude Code, and OpenCode accept `model:effort` shorthand (e.g., `gpt-5.6-sol:xhigh`).
+   - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`); takes precedence over the model suffix.
    - **YOLO mode** — skip confirmation prompts in the agent.
    - **Approvals** — require human approval for tool calls.
    - **Setup script** — shell commands to run before the agent (install tools, source dotfiles, configure runtime variables).
@@ -126,8 +126,8 @@ The plugin injects these variables into every build:
 | Variable | Description |
 |----------|-------------|
 | `AI_AGENT_PROMPT` | The configured prompt text |
-| `AI_AGENT_MODEL` | The configured model name |
-| `AI_AGENT_REASONING_EFFORT` | The configured reasoning effort |
+| `AI_AGENT_MODEL` | The field-derived model name, without a recognized reasoning-effort suffix |
+| `AI_AGENT_REASONING_EFFORT` | The field-derived reasoning effort |
 
 ### Executable Path
 
@@ -195,6 +195,19 @@ The **Reasoning effort** field is passed only to agents with verified CLI suppor
 - OpenCode: `--variant <value>`
 
 Gemini CLI and Cursor Agent currently ignore the field in the built-in command template.
+
+For supported agents, the **Model** field also accepts `model:effort` shorthand. For example,
+`gpt-5.6-sol:xhigh` resolves to model `gpt-5.6-sol` and reasoning effort `xhigh`. Recognized
+suffixes depend on the selected agent: Codex accepts `low`, `medium`, `high`, `xhigh`, `max`,
+and `ultra`; Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`; OpenCode also
+accepts `minimal` and provider-defined support still determines whether a variant is available.
+Other suffixes remain part of the model identifier. Use a double colon to keep a recognized
+suffix literal, such as `provider/model::high` for model `provider/model:high`. A value in
+**Reasoning effort** overrides the shorthand suffix.
+
+**Extra CLI args** can override generated model or effort options. The `AI_AGENT_*` variables
+and build metadata continue to describe the fields after shorthand resolution, before those
+later command-line overrides.
 
 ### Credential Injection
 

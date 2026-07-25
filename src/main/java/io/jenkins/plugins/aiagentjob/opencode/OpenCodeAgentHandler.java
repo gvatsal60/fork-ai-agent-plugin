@@ -18,8 +18,12 @@ import org.kohsuke.stapler.DataBoundConstructor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
+    private static final Set<String> REASONING_EFFORTS =
+            Set.of("minimal", "low", "medium", "high", "xhigh", "max", "ultra");
+
     @DataBoundConstructor
     public OpenCodeAgentHandler() {}
 
@@ -39,18 +43,25 @@ public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
     }
 
     @Override
+    protected Set<String> getSupportedReasoningEfforts() {
+        return REASONING_EFFORTS;
+    }
+
+    @Override
     public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
         List<String> command = new ArrayList<>();
         command.add("opencode");
         command.add("run");
         command.add("--format");
         command.add("json");
-        String model = Util.fixEmptyAndTrim(config.getModel());
+        ModelSelection selection =
+                resolveModelSelection(config.getModel(), config.getReasoningEffort());
+        String model = Util.fixEmptyAndTrim(selection.getModel());
         if (model != null) {
             command.add("--model");
             command.add(model);
         }
-        String reasoningEffort = Util.fixEmptyAndTrim(config.getReasoningEffort());
+        String reasoningEffort = Util.fixEmptyAndTrim(selection.getReasoningEffort());
         if (reasoningEffort != null) {
             command.add("--variant");
             command.add(reasoningEffort);
@@ -65,8 +76,10 @@ public final class OpenCodeAgentHandler extends AiAgentTypeHandler {
         command.add("opencode");
         command.add("acp");
 
-        String model = Util.fixNull(config.getModel()).trim();
-        String reasoningEffort = Util.fixNull(config.getReasoningEffort()).trim();
+        ModelSelection selection =
+                resolveModelSelection(config.getModel(), config.getReasoningEffort());
+        String model = selection.getModel();
+        String reasoningEffort = selection.getReasoningEffort();
         List<String> extraArgs =
                 new ArrayList<>(Arrays.asList(Util.tokenize(Util.fixNull(config.getExtraArgs()))));
         for (int i = 0; i < extraArgs.size(); i++) {

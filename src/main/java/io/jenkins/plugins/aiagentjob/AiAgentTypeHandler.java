@@ -2,11 +2,13 @@ package io.jenkins.plugins.aiagentjob;
 
 import hudson.ExtensionPoint;
 import hudson.FilePath;
+import hudson.Util;
 import hudson.model.AbstractDescribableImpl;
 import hudson.model.TaskListener;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Describable extension point for an AI agent implementation.
@@ -54,6 +56,36 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
         return false;
     }
 
+    /** Reasoning efforts recognized when appended to a model identifier. */
+    protected Set<String> getSupportedReasoningEfforts() {
+        return Set.of();
+    }
+
+    /** Resolves the model and optional {@code model:effort} shorthand for this handler. */
+    public final ModelSelection resolveModelSelection(
+            String configuredModel, String configuredReasoningEffort) {
+        String model = Util.fixNull(configuredModel).trim();
+        String reasoningEffort = Util.fixNull(configuredReasoningEffort).trim();
+        Set<String> supportedEfforts = getSupportedReasoningEfforts();
+        if (!supportedEfforts.isEmpty()) {
+            int separator = model.lastIndexOf(':');
+            if (separator > 0 && separator < model.length() - 1) {
+                String suffix = model.substring(separator + 1);
+                if (supportedEfforts.contains(suffix)) {
+                    if (model.charAt(separator - 1) == ':') {
+                        model = model.substring(0, separator - 1) + model.substring(separator);
+                    } else {
+                        model = model.substring(0, separator);
+                        if (reasoningEffort.isEmpty()) {
+                            reasoningEffort = suffix;
+                        }
+                    }
+                }
+            }
+        }
+        return new ModelSelection(model, reasoningEffort);
+    }
+
     public abstract List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt);
 
     /**
@@ -86,6 +118,25 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
      * false} for any JSON it does not recognise, so the shared extractor handles it as a fallback.
      */
     public abstract AiAgentStatsExtractor getStatsExtractor();
+
+    /** Immutable runtime model and reasoning-effort selection. */
+    public static final class ModelSelection {
+        private final String model;
+        private final String reasoningEffort;
+
+        private ModelSelection(String model, String reasoningEffort) {
+            this.model = model;
+            this.reasoningEffort = reasoningEffort;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public String getReasoningEffort() {
+            return reasoningEffort;
+        }
+    }
 
     /** Immutable settings for an Agent Client Protocol execution. */
     public static final class AcpExecutionSpec {

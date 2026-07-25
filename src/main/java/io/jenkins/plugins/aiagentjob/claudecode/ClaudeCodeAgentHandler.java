@@ -14,8 +14,12 @@ import org.kohsuke.stapler.DataBoundConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
+    private static final Set<String> REASONING_EFFORTS =
+            Set.of("low", "medium", "high", "xhigh", "max");
+
     @DataBoundConstructor
     public ClaudeCodeAgentHandler() {}
 
@@ -27,6 +31,11 @@ public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
     @Override
     public String getDefaultApiKeyEnvVar() {
         return "ANTHROPIC_API_KEY";
+    }
+
+    @Override
+    protected Set<String> getSupportedReasoningEfforts() {
+        return REASONING_EFFORTS;
     }
 
     @Override
@@ -42,12 +51,14 @@ public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
         if (config.isYoloMode()) {
             command.add("--dangerously-skip-permissions");
         }
-        String model = Util.fixEmptyAndTrim(config.getModel());
+        ModelSelection selection =
+                resolveModelSelection(config.getModel(), config.getReasoningEffort());
+        String model = Util.fixEmptyAndTrim(selection.getModel());
         if (model != null) {
             command.add("--model");
             command.add(model);
         }
-        String reasoningEffort = Util.fixEmptyAndTrim(config.getReasoningEffort());
+        String reasoningEffort = Util.fixEmptyAndTrim(selection.getReasoningEffort());
         if (reasoningEffort != null) {
             command.add("--effort");
             command.add(reasoningEffort);

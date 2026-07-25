@@ -584,6 +584,50 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void expandsAndResolvesParameterizedModelReasoningSuffix(JenkinsRule jenkins) throws Exception {
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "fake-codex-suffix-bin",
+                        "codex",
+                        "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'env-model=%s\\nenv-effort=%s\\n' \"$AI_AGENT_MODEL\" \"$AI_AGENT_REASONING_EFFORT\"\n");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-expanded-model-suffix",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setModel("gpt-5.6-sol:${EFFORT_CHOICE}");
+                            b.setSetupScript("true");
+                            b.setEnvironmentVariables("PATH=" + path);
+                        });
+        project.addProperty(
+                new ParametersDefinitionProperty(
+                        new StringParameterDefinition("EFFORT_CHOICE", "xhigh")));
+
+        FreeStyleBuild build =
+                project.scheduleBuild2(
+                                0,
+                                new ParametersAction(
+                                        new StringParameterValue("EFFORT_CHOICE", "xhigh")))
+                        .get();
+        jenkins.assertBuildStatusSuccess(build);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+
+        assertTrue(rawLog.contains("gpt-5.6-sol"));
+        assertFalse(rawLog.contains("gpt-5.6-sol:xhigh"));
+        assertTrue(rawLog.contains("model_reasoning_effort=\"xhigh\""));
+        assertTrue(rawLog.contains("env-model=gpt-5.6-sol"));
+        assertTrue(rawLog.contains("env-effort=xhigh"));
+        assertEquals("gpt-5.6-sol", action.getInvocationModel(action.getLatestInvocationId()));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void executablePathRunsAgentOutsidePath(JenkinsRule jenkins) throws Exception {
         File fakeBin =
                 installExecutable(

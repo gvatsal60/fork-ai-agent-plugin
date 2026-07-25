@@ -62,6 +62,10 @@ final class AiAgentExecutor {
         String executablePath =
                 Util.replaceMacro(Util.fixNull(config.getExecutablePath()), env).trim();
         String commandOverride = Util.fixNull(config.getCommandOverride()).trim();
+        AiAgentTypeHandler.ModelSelection modelSelection =
+                config.getAgent().resolveModelSelection(model, reasoningEffort);
+        model = modelSelection.getModel();
+        reasoningEffort = modelSelection.getReasoningEffort();
         AiAgentConfiguration resolvedConfig =
                 new ResolvedAiAgentConfiguration(config, model, reasoningEffort, executablePath);
         AiAgentTypeHandler agent = resolvedConfig.getAgent();
