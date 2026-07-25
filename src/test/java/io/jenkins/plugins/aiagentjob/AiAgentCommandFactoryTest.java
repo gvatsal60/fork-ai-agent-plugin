@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
@@ -32,6 +33,7 @@ class AiAgentCommandFactoryTest {
         handlers.add(new CursorAgentHandler());
         handlers.add(new OpenCodeAgentHandler());
         handlers.add(new GeminiCliAgentHandler());
+        handlers.add(new AntigravityAgentHandler());
         return handlers;
     }
 
@@ -520,6 +522,87 @@ class AiAgentCommandFactoryTest {
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
 
         assertEquals("gemini-model:high", cmd.get(cmd.indexOf("-m") + 1));
+    }
+
+    // ======================== Antigravity CLI ========================
+
+    @Test
+    void antigravity_basicCommand() {
+        AiAgentBuilder project = createProject(new AntigravityAgentHandler());
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "summarize project");
+
+        assertEquals("agy", cmd.get(0));
+        assertTrue(cmd.contains("--print"));
+        assertTrue(cmd.contains("--output-format"));
+        assertTrue(cmd.contains("stream-json"));
+        assertTrue(cmd.contains("summarize project"));
+    }
+
+    @Test
+    void antigravity_yoloMode() {
+        AiAgentBuilder project = createProject(new AntigravityAgentHandler());
+        project.setYoloMode(true);
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertTrue(cmd.contains("--dangerously-skip-permissions"));
+    }
+
+    @Test
+    void antigravity_manualApprovalsAreRejected() {
+        AiAgentBuilder project = createProject(new AntigravityAgentHandler());
+        project.setRequireApprovals(true);
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("ACP-capable"));
+    }
+
+    @Test
+    void antigravity_withModelAndReasoningEffort() {
+        AiAgentBuilder project = createProject(new AntigravityAgentHandler());
+        project.setModel("gemini-3.6-flash-high");
+        project.setReasoningEffort("high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        int modelIdx = cmd.indexOf("--model");
+        int effortIdx = cmd.indexOf("--effort");
+        assertTrue(modelIdx >= 0);
+        assertEquals("gemini-3.6-flash-high", cmd.get(modelIdx + 1));
+        assertTrue(effortIdx >= 0);
+        assertEquals("high", cmd.get(effortIdx + 1));
+    }
+
+    @Test
+    void antigravity_modelSuffixSetsReasoningEffort() {
+        AiAgentBuilder project = createProject(new AntigravityAgentHandler());
+        project.setModel("gemini-3.6-flash:high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("gemini-3.6-flash", cmd.get(cmd.indexOf("--model") + 1));
+        assertEquals("high", cmd.get(cmd.indexOf("--effort") + 1));
+    }
+
+    @Test
+    void antigravity_credentialRequiresExplicitEnvironmentVariable() {
+        AiAgentBuilder project = createProject(new AntigravityAgentHandler());
+        project.setApiCredentialsId("custom-auth");
+
+        IllegalArgumentException error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
+
+        assertTrue(error.getMessage().contains("node-level Google authentication"));
+
+        project.setApiEnvVarName("GOOGLE_APPLICATION_CREDENTIALS");
+        assertEquals("agy", AiAgentCommandFactory.buildDefaultCommand(project, "test").get(0));
     }
 
     // ======================== Extra Args Tests ========================

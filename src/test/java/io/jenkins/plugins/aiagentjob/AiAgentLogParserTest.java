@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.jenkins.plugins.aiagentjob.antigravity.AntigravityLogFormat;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
 import io.jenkins.plugins.aiagentjob.codex.CodexLogFormat;
 import io.jenkins.plugins.aiagentjob.cursor.CursorLogFormat;
@@ -370,6 +371,46 @@ class AiAgentLogParserTest {
                 0,
                 events.stream().filter(e -> "tool_result".equals(e.getCategory())).count(),
                 "Empty Gemini tool_result entries should be hidden");
+    }
+
+    // ======================== Antigravity CLI Tests ========================
+
+    @Test
+    void antigravityConversation_parsesCurrentTranscriptShape() throws IOException {
+        List<AiAgentLogParser.EventView> events =
+                parseFixture("antigravity-cli-conversation.jsonl", AntigravityLogFormat.INSTANCE);
+
+        assertEquals(
+                List.of("system", "tool_call", "tool_result", "assistant"), categories(events));
+        AiAgentLogParser.EventView toolCall = events.get(1);
+        AiAgentLogParser.EventView toolResult = events.get(2);
+        assertEquals("printf 'fixture-output\\n'", toolCall.getToolInput());
+        assertEquals("fixture-output", toolResult.getToolOutput());
+        assertEquals("AGY_TOOL_OK", events.get(3).getContent().trim());
+    }
+
+    @Test
+    void parseLine_handlesAntigravityErrorResult() {
+        String json =
+                "{\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"error\":\"invalid model\",\"duration_seconds\":0}}";
+
+        AiAgentLogParser.ParsedLine line =
+                AiAgentLogParser.parseLine(1, json, AntigravityLogFormat.INSTANCE);
+
+        assertEquals("error", line.toEventView().getCategory());
+        assertEquals("invalid model", line.toEventView().getContent());
+    }
+
+    @Test
+    void parseLine_preservesStandaloneAntigravitySuccessResult() {
+        String json =
+                "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"completed output\",\"duration_seconds\":1.25}}";
+
+        AiAgentLogParser.ParsedLine line =
+                AiAgentLogParser.parseLine(1, json, AntigravityLogFormat.INSTANCE);
+
+        assertEquals("result", line.toEventView().getCategory());
+        assertEquals("completed output", line.toEventView().getContent());
     }
 
     // ======================== OpenCode Tests ========================
@@ -814,6 +855,14 @@ class AiAgentLogParserTest {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("gemini-cli-conversation.jsonl", ClaudeCodeLogFormat.INSTANCE);
         assertEquals(6, events.size(), "Current Gemini fixture should produce 6 visible events");
+    }
+
+    @Test
+    void antigravityConversation_hasCorrectEventCount() throws IOException {
+        List<AiAgentLogParser.EventView> events =
+                parseFixture("antigravity-cli-conversation.jsonl", AntigravityLogFormat.INSTANCE);
+        assertEquals(
+                4, events.size(), "Current Antigravity fixture should produce 4 visible events");
     }
 
     @Test

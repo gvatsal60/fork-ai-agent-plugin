@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 
+import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
@@ -186,6 +187,29 @@ class AiAgentRecordedConversationTest {
         long assistantCount =
                 events.stream().filter(e -> "assistant".equals(e.getCategory())).count();
         assertEquals(1, assistantCount, "Gemini deltas should merge into one assistant event");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void antigravityRecording_producesCorrectEvents(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                buildProjectWithFixture(
+                        jenkins,
+                        "antigravity-recording",
+                        new AntigravityAgentHandler(),
+                        "antigravity-cli-conversation.jsonl");
+
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+
+        List<String> cats =
+                action.getEvents().stream()
+                        .map(AiAgentLogParser.EventView::getCategory)
+                        .collect(Collectors.toList());
+        assertEquals(List.of("system", "tool_call", "tool_result", "assistant"), cats);
+        assertEquals(1, action.getUsageStats().getToolCalls());
+        assertEquals("gemini-3.6-flash-low", action.getUsageStats().getDetectedModel());
     }
 
     @Test

@@ -31,6 +31,7 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
     /** Stable identifier for this agent implementation. */
     public abstract String getId();
 
+    /** Default API-key environment variable, or empty when the agent uses node-level auth. */
     public abstract String getDefaultApiKeyEnvVar();
 
     /** Rejects unsupported execution settings before any process or temporary file is created. */

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.jenkins.plugins.aiagentjob.antigravity.AntigravityStatsExtractor;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeStatsExtractor;
 import io.jenkins.plugins.aiagentjob.codex.CodexStatsExtractor;
 import io.jenkins.plugins.aiagentjob.cursor.CursorStatsExtractor;
@@ -86,6 +87,27 @@ class AgentUsageStatsTest {
     @Test
     void gemini_noCostReturnsEmptyDisplay() throws IOException {
         AgentUsageStats stats = parseStats("stats-gemini.jsonl", ClaudeCodeStatsExtractor.INSTANCE);
+        assertEquals("", stats.getCostDisplay());
+    }
+
+    // ======================== Antigravity ========================
+
+    @Test
+    void antigravity_extractsNestedUsageAndMetadata() throws IOException {
+        AgentUsageStats stats =
+                parseStats(
+                        "antigravity-cli-conversation.jsonl", AntigravityStatsExtractor.INSTANCE);
+
+        assertTrue(stats.hasData());
+        assertEquals(1250, stats.getInputTokens());
+        assertEquals(52, stats.getOutputTokens());
+        assertEquals(15, stats.getReasoningTokens());
+        assertEquals(350, stats.getCacheReadTokens());
+        assertEquals(1317, stats.getTotalTokens());
+        assertEquals(1250, stats.getDurationMs());
+        assertEquals(1, stats.getNumTurns());
+        assertEquals(1, stats.getToolCalls());
+        assertEquals("gemini-3.6-flash-low", stats.getDetectedModel());
         assertEquals("", stats.getCostDisplay());
     }
 

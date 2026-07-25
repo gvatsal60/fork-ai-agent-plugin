@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.model.FreeStyleProject;
 
+import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
 
 import org.junit.jupiter.api.Test;
@@ -72,6 +73,20 @@ class AiAgentBuilderConfigRoundTripTest {
         AiAgentBuilder builder = new AiAgentBuilder();
         builder.setCommandOverride("/opt/opencode\n  --model gpt-5\n  --json");
         assertEquals("/opt/opencode --model gpt-5 --json", builder.getCommandOverride());
+    }
+
+    @Test
+    void preservesAntigravityHandlerSelection(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project = jenkins.createFreeStyleProject("antigravity-roundtrip");
+        AiAgentBuilder builder = new AiAgentBuilder();
+        builder.setAgent(new AntigravityAgentHandler());
+        project.getBuildersList().add(builder);
+        project.save();
+
+        project = jenkins.configRoundtrip(project);
+
+        AiAgentBuilder reloaded = (AiAgentBuilder) project.getBuildersList().get(0);
+        assertEquals("ANTIGRAVITY_CLI", reloaded.getAgent().getId());
     }
 
     @Test

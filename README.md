@@ -5,14 +5,15 @@
 [![Jenkins Plugin](https://img.shields.io/badge/Jenkins-2.528.3+-blue.svg)](https://www.jenkins.io/)
 
 A Jenkins plugin that adds a reusable **Run AI Agent** build step for running autonomous coding
-agents (Claude Code, Codex CLI, Cursor Agent, OpenCode, Gemini CLI) in Jenkins jobs and pipelines.
+agents (Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, Gemini CLI) in Jenkins jobs
+and pipelines.
 
 Plugin ID (artifactId): `ai-agent`
 
 ## Features
 
 - **Reusable build step** — add `Run AI Agent` to Freestyle jobs or Pipeline via `aiAgent(...)`.
-- **Multiple agent support** — Claude Code, Codex CLI, Cursor Agent, OpenCode, and Gemini CLI.
+- **Multiple agent support** — Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, and Gemini CLI.
 - **Inline conversation view** — live-streaming conversation on the build page with structured display of assistant messages, tool calls with inputs/outputs, and thinking blocks. Multiple invocations in the same build are shown as separate cards (latest expanded, older collapsible).
 - **Markdown rendering** — assistant and result messages are rendered as formatted HTML.
 - **Approval gates** — optionally pause builds for human review before tool execution.
@@ -28,6 +29,7 @@ Plugin ID (artifactId): `ai-agent`
 | [Codex CLI](https://github.com/openai/codex) | JSON | Tokens only |
 | [Cursor Agent](https://www.cursor.com/) | stream-json | Tokens only |
 | [OpenCode](https://github.com/opencode-ai/opencode) | JSON | Full (tokens + cost) |
+| [Antigravity CLI](https://antigravity.google/docs/cli/overview) | stream-json | Tokens only |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | stream-json | Tokens only |
 
 ## Screenshot
@@ -58,7 +60,7 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
 2. Add/configure the **Run AI Agent** build step:
    - **Agent Type** — select the coding agent to run.
    - **Prompt** — the task to send to the agent.
-   - **Model** — optional model override. Codex, Claude Code, and OpenCode accept `model:effort` shorthand (e.g., `gpt-5.6-sol:xhigh`).
+   - **Model** — optional model override. Codex, Claude Code, OpenCode, and Antigravity CLI accept `model:effort` shorthand (e.g., `gpt-5.6-sol:xhigh`).
    - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`); takes precedence over the model suffix.
    - **YOLO mode** — skip confirmation prompts in the agent.
    - **Approvals** — require human approval for tool calls.
@@ -74,7 +76,7 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
 ### Pipeline Syntax
 
 The step symbol is `aiAgent`, and agent handlers are referenced by their symbols such as
-`claudeCode()`, `codex()`, `geminiCli()`, `cursor()`, and `openCode()`.
+`claudeCode()`, `codex()`, `cursor()`, `openCode()`, `antigravity()`, and `geminiCli()`.
 
 Minimal invocation (uses default Claude Code handler):
 
@@ -83,6 +85,34 @@ aiAgent(
   prompt: 'Summarize this repository and propose 3 cleanup PRs'
 )
 ```
+
+Antigravity CLI with a pinned model and reasoning effort:
+
+```groovy
+aiAgent(
+  agent: antigravity(),
+  prompt: 'Review this project and fix the failing tests',
+  model: 'gemini-3.6-flash-high',
+  reasoningEffort: 'high',
+  yoloMode: true
+)
+```
+
+### Moving from Gemini CLI to Antigravity CLI
+
+Google is [transitioning Gemini CLI users to Antigravity CLI](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+This plugin keeps `geminiCli()` available, so jobs can migrate independently without a breaking
+configuration change.
+
+Install `agy` on each Jenkins node with the
+[official Antigravity installer](https://github.com/google-antigravity/antigravity-cli#installation),
+ensure its directory is on the Jenkins service account's `PATH`, and authenticate once as that OS
+account. Use `agy` 1.1.7 or newer; plugin support relies on headless JSON output and usage fields
+documented in the [Antigravity CLI changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md).
+The default command uses headless `--print` mode with `--output-format stream-json`.
+Antigravity's `--model`, `--effort`, and `--dangerously-skip-permissions` flags map to the plugin's
+Model, Reasoning effort, and YOLO fields. When a model slug includes an effort suffix, keep both
+values aligned (for example, `gemini-3.6-flash-high` with `high`).
 
 OpenCode with manual tool-call approvals:
 
@@ -193,6 +223,7 @@ The **Reasoning effort** field is passed only to agents with verified CLI suppor
 - Codex CLI: `-c model_reasoning_effort="<value>"`
 - Claude Code: `--effort <value>`
 - OpenCode: `--variant <value>`
+- Antigravity CLI: `--effort <value>` (`low`, `medium`, or `high`)
 
 Gemini CLI and Cursor Agent currently ignore the field in the built-in command template.
 
@@ -200,7 +231,8 @@ For supported agents, the **Model** field also accepts `model:effort` shorthand.
 `gpt-5.6-sol:xhigh` resolves to model `gpt-5.6-sol` and reasoning effort `xhigh`. Recognized
 suffixes depend on the selected agent: Codex accepts `low`, `medium`, `high`, `xhigh`, `max`,
 and `ultra`; Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`; OpenCode also
-accepts `minimal` and provider-defined support still determines whether a variant is available.
+accepts `minimal`; and Antigravity CLI accepts `low`, `medium`, and `high`. Provider-defined
+support still determines whether a variant is available.
 Other suffixes remain part of the model identifier. Use a double colon to keep a recognized
 suffix literal, such as `provider/model::high` for model `provider/model:high`. A value in
 **Reasoning effort** overrides the shorthand suffix.
@@ -213,13 +245,17 @@ later command-line overrides.
 
 If the selected agent type has an associated credential ID (e.g., API key), the plugin resolves it from Jenkins credentials and injects it as an environment variable. The credential is masked in the build log and captured raw agent log.
 
+Antigravity CLI uses the Jenkins node OS account's Google Sign-In and secure credential store by
+default, so leave **API key credential** empty. For a custom enterprise auth flow, configure its
+environment explicitly and set **API Key env var override** before selecting a Jenkins credential.
+
 Prompt and command-line values are not retained in build action metadata because Pipeline and environment expansion may place credentials in either value.
 
 ### Approval Gates
 
 Manual approvals are currently supported only for OpenCode. Approval builds use its bidirectional Agent Client Protocol server and pause before tool execution until a user approves or denies from the build page. Denied or timed-out requests fail the build. The installed OpenCode CLI must support `opencode acp`; builds without manual approvals continue to use `opencode run`.
 
-Claude Code, Codex CLI, Cursor Agent, Gemini CLI, and command overrides do not expose a supported bidirectional approval channel to this plugin. Jobs reject those combinations before launching instead of showing an approval that cannot affect tool execution.
+Claude Code, Codex CLI, Cursor Agent, Antigravity CLI, Gemini CLI, and command overrides do not expose a supported bidirectional approval channel to this plugin. Jobs reject those combinations before launching instead of showing an approval that cannot affect tool execution.
 
 ### Usage Statistics
 
@@ -283,6 +319,7 @@ src/main/java/io/jenkins/plugins/aiagentjob/
 ├── AiAgentTempFiles.java           # Temp directory management for build workspaces
 ├── ExecutionRegistry.java          # In-memory registry for live execution state
 ├── LogFormatUtils.java             # Shared JSON field extraction helpers
+├── antigravity/                    # Antigravity CLI implementation
 ├── claudecode/                     # Claude Code agent implementation
 ├── codex/                          # Codex CLI implementation (+ optional config.toml)
 ├── cursor/                         # Cursor Agent implementation
@@ -296,8 +333,9 @@ Each agent lives in its own sub-package with up to three files. Use the `cursor/
 minimal reference:
 
 1. **Handler** (`ExampleAgentHandler extends AiAgentTypeHandler`) — annotate with `@Extension`
-   and `@Symbol("example")`. Implement `getId()`, `getDefaultApiKeyEnvVar()`,
-   `buildDefaultCommand()`, `getLogFormat()`, and `getStatsExtractor()`.
+   and `@Symbol("example")`. Implement `getId()`, `getDefaultApiKeyEnvVar()` (return an empty value
+   for node-level authentication), `buildDefaultCommand()`, `getLogFormat()`, and
+   `getStatsExtractor()`.
 2. **Log format** (`ExampleLogFormat implements AiAgentLogFormat`) — classify agent-specific
    JSONL events into `ParsedLine` types. Return `null` for unrecognised lines so the shared
    parser handles them. If the agent emits stream-json compatible with Claude Code, reuse
