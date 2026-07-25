@@ -129,6 +129,14 @@ The plugin injects these variables into every build:
 | `AI_AGENT_MODEL` | The configured model name |
 | `AI_AGENT_REASONING_EFFORT` | The configured reasoning effort |
 
+### Executable Path
+
+Jenkins services and agents do not load interactive shell startup files, so their `PATH` often
+differs from an interactive terminal. Set **Executable path** to the agent launcher on the build
+node, such as `$HOME/.local/bin/codex`. The plugin keeps the generated arguments and replaces only
+the executable. For Claude Code, this setting replaces the `npx` launcher; use **Command override**
+when the entire command shape must change.
+
 ### Setup Script
 
 The **Setup script** field accepts shell commands that run before the agent process starts on
@@ -137,25 +145,27 @@ Use it to prepare the build environment — install dependencies, source dotfile
 or map Jenkins-bound credentials into variables that the agent needs at runtime.
 
 ```bash
-# Example: add local binaries to PATH, source nvm, install a CLI tool
+# Example: add local binaries to PATH, load nvm, install a CLI tool
 export PATH="$HOME/.local/bin:$PATH"
-source "$HOME/.nvm/nvm.sh"
+. "$HOME/.nvm/nvm.sh"
 nvm use 22
 npm install -g @anthropic-ai/claude-code
 ```
 
 The setup script and agent command run in the **same shell session**, so any `export`ed
 variables, PATH changes, or sourced dotfiles are available to the agent. Supports shebang
-lines (e.g. `#!/bin/zsh`) — if no shebang is present, `/bin/sh -e` is used. If the script exits
-with a non-zero code the build fails immediately without launching the agent. Shell tracing is
+lines (e.g. `#!/bin/zsh`) — if no shebang is present, `/bin/sh -e` is used and the script must use
+POSIX syntax such as `. file`. Add a Bash or Zsh shebang before using `source`; add `set -e` when
+that interpreter should stop on the first error. If the script exits with a non-zero code the build
+fails immediately without launching the agent. Shell tracing is
 disabled for setup and generated agent commands so expanded values, prompts, and arguments are not
 written to the build log. On Windows nodes, use **Command override** instead.
 
 ### Command Override
 
 **Command override** runs a single shell command or shell snippet instead of the built-in
-agent command. Use this when you need full control over the launched process or want to invoke
-the agent from a custom path.
+agent command. Use **Executable path** for a custom binary location while retaining generated
+arguments; use **Command override** when you need full control over the launched process.
 
 ### Codex Job-Scoped config.toml
 

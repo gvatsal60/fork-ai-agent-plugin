@@ -322,13 +322,17 @@ class AiAgentCommandFactoryTest {
     void openCode_acpExecutionMapsRunOptionsToSessionConfig() {
         OpenCodeAgentHandler handler = new OpenCodeAgentHandler();
         AiAgentBuilder project = createProject(handler);
+        project.setExecutablePath("/opt/agents/opencode");
         project.setModel("opencode/provider-model");
         project.setReasoningEffort("high");
         project.setExtraArgs("--model override/model --variant=xhigh --format json --pure");
 
         AiAgentTypeHandler.AcpExecutionSpec execution = handler.buildAcpExecution(project);
 
-        assertEquals(List.of("opencode", "acp", "--pure"), execution.getCommand());
+        assertEquals(
+                List.of("/opt/agents/opencode", "acp", "--pure"),
+                AiAgentCommandFactory.applyExecutablePath(
+                        execution.getCommand(), project.getExecutablePath()));
         assertEquals("override/model", execution.getModel());
         assertEquals("xhigh", execution.getReasoningEffort());
     }
@@ -470,6 +474,18 @@ class AiAgentCommandFactoryTest {
     }
 
     // ======================== Model Without Value ========================
+
+    @Test
+    void allAgents_supportExecutablePathOverride() {
+        for (AiAgentTypeHandler handler : allHandlers()) {
+            AiAgentBuilder project = createProject(handler);
+            project.setExecutablePath("/opt/agents/" + handler.getId());
+
+            List<String> command = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+            assertEquals(project.getExecutablePath(), command.get(0));
+        }
+    }
 
     @Test
     void allAgents_noModelByDefault() {

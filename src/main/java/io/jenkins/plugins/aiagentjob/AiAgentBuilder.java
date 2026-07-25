@@ -45,6 +45,7 @@ public class AiAgentBuilder extends Builder implements SimpleBuildStep, AiAgentC
     private String reasoningEffort = "";
     private String prompt = "";
     private String workingDirectory = "";
+    private String executablePath = "";
     private boolean yoloMode;
     private boolean requireApprovals;
     private int approvalTimeoutSeconds = 600;
@@ -136,6 +137,16 @@ public class AiAgentBuilder extends Builder implements SimpleBuildStep, AiAgentC
     @DataBoundSetter
     public void setWorkingDirectory(String workingDirectory) {
         this.workingDirectory = Util.fixNull(workingDirectory);
+    }
+
+    @Override
+    public String getExecutablePath() {
+        return executablePath;
+    }
+
+    @DataBoundSetter
+    public void setExecutablePath(String executablePath) {
+        this.executablePath = Util.fixNull(executablePath).trim();
     }
 
     @Override
@@ -261,6 +272,7 @@ public class AiAgentBuilder extends Builder implements SimpleBuildStep, AiAgentC
         reasoningEffort = Util.fixNull(reasoningEffort);
         prompt = Util.fixNull(prompt);
         workingDirectory = Util.fixNull(workingDirectory);
+        executablePath = Util.fixNull(executablePath).trim();
         commandOverride = normalizeCommandOverride(commandOverride);
         extraArgs = Util.fixNull(extraArgs);
         environmentVariables = Util.fixNull(environmentVariables);

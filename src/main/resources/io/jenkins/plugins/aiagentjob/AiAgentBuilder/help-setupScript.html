@@ -1,5 +1,7 @@
 <div>
   Runs before the agent command and shares the same shell session, so exported variables flow into
-  the agent process.
+  the agent process. Without a shebang, Jenkins uses <code>/bin/sh -e</code>, so use POSIX syntax
+  such as <code>. file</code>. Add <code>#!/bin/bash</code> or <code>#!/bin/zsh</code> before using
+  shell-specific syntax such as <code>source</code>.
   This is currently supported on Unix agents only.
 </div>
