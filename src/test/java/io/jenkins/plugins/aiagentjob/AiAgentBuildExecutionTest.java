@@ -584,6 +584,50 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void expandsAndResolvesParameterizedModelReasoningSuffix(JenkinsRule jenkins) throws Exception {
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "fake-codex-suffix-bin",
+                        "codex",
+                        "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'env-model=%s\\nenv-effort=%s\\n' \"$AI_AGENT_MODEL\" \"$AI_AGENT_REASONING_EFFORT\"\n");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-expanded-model-suffix",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setModel("gpt-5.6-sol:${EFFORT_CHOICE}");
+                            b.setSetupScript("true");
+                            b.setEnvironmentVariables("PATH=" + path);
+                        });
+        project.addProperty(
+                new ParametersDefinitionProperty(
+                        new StringParameterDefinition("EFFORT_CHOICE", "xhigh")));
+
+        FreeStyleBuild build =
+                project.scheduleBuild2(
+                                0,
+                                new ParametersAction(
+                                        new StringParameterValue("EFFORT_CHOICE", "xhigh")))
+                        .get();
+        jenkins.assertBuildStatusSuccess(build);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+
+        assertTrue(rawLog.contains("gpt-5.6-sol"));
+        assertFalse(rawLog.contains("gpt-5.6-sol:xhigh"));
+        assertTrue(rawLog.contains("model_reasoning_effort=\"xhigh\""));
+        assertTrue(rawLog.contains("env-model=gpt-5.6-sol"));
+        assertTrue(rawLog.contains("env-effort=xhigh"));
+        assertEquals("gpt-5.6-sol", action.getInvocationModel(action.getLatestInvocationId()));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void executablePathRunsAgentOutsidePath(JenkinsRule jenkins) throws Exception {
         File fakeBin =
                 installExecutable(
@@ -669,6 +713,42 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void preservesEscapedReasoningSuffixDuringExecution(JenkinsRule jenkins) throws Exception {
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "fake-codex-escaped-suffix-bin",
+                        "codex",
+                        "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf 'env-model=%s\\nenv-effort=%s\\n' \"$AI_AGENT_MODEL\" \"$AI_AGENT_REASONING_EFFORT\"\n");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-escaped-model-suffix",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setModel("provider/example/model::high");
+                            b.setSetupScript("true");
+                            b.setEnvironmentVariables("PATH=" + path);
+                        });
+
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+
+        assertTrue(rawLog.contains("provider/example/model:high"));
+        assertFalse(rawLog.contains("model_reasoning_effort"));
+        assertTrue(rawLog.contains("env-model=provider/example/model:high"));
+        assertTrue(rawLog.contains("env-effort="));
+        assertEquals(
+                "provider/example/model:high",
+                action.getInvocationModel(action.getLatestInvocationId()));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void processLaunchFailureCompletesInvocationMetadata(JenkinsRule jenkins) throws Exception {
         FreeStyleProject project =
                 newProject(
@@ -720,7 +800,7 @@ class AiAgentBuildExecutionTest {
                             b.setApprovalTimeoutSeconds(30);
                             b.setApiCredentialsId("approval-secret");
                             b.setApiEnvVarName("FAKE_ACP_SECRET_INPUT");
-                            b.setModel("test/provider-model");
+                            b.setModel("test/provider::high");
                             b.setExtraArgs("--variant high --format json --pure");
                             b.setExecutablePath(executable);
                             b.setSetupScript("cd \"${WORKSPACE}\"");
@@ -758,8 +838,7 @@ class AiAgentBuildExecutionTest {
                         .contains("\"optionId\":\"once\""));
         String configRequests = buildWorkspace.child("config-requests.jsonl").readToString();
         assertTrue(
-                configRequests.contains(
-                        "\"configId\":\"model\",\"value\":\"test/provider-model\""));
+                configRequests.contains("\"configId\":\"model\",\"value\":\"test/provider:high\""));
         assertTrue(configRequests.contains("\"configId\":\"effort\",\"value\":\"high\""));
         assertTrue(buildWorkspace.child("acp-command.txt").readToString().contains("acp --pure"));
 

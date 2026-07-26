@@ -20,8 +20,12 @@ import org.kohsuke.stapler.DataBoundSetter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class CodexAgentHandler extends AiAgentTypeHandler {
+    private static final Set<String> REASONING_EFFORTS =
+            Set.of("low", "medium", "high", "xhigh", "max", "ultra");
+
     private boolean customConfigEnabled;
     private String customConfigToml = "";
     private String additionalGlobalArgs = "";
@@ -38,6 +42,11 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
     @Override
     public String getDefaultApiKeyEnvVar() {
         return "OPENAI_API_KEY";
+    }
+
+    @Override
+    protected Set<String> getSupportedReasoningEfforts() {
+        return REASONING_EFFORTS;
     }
 
     @Override
@@ -62,12 +71,14 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
             command.add("--ask-for-approval");
             command.add("never");
         }
-        String model = Util.fixEmptyAndTrim(config.getModel());
+        ModelSelection selection =
+                resolveModelSelection(config.getModel(), config.getReasoningEffort());
+        String model = Util.fixEmptyAndTrim(selection.getModel());
         if (model != null) {
             command.add("--model");
             command.add(model);
         }
-        String reasoningEffort = Util.fixEmptyAndTrim(config.getReasoningEffort());
+        String reasoningEffort = Util.fixEmptyAndTrim(selection.getReasoningEffort());
         if (reasoningEffort != null) {
             command.add("-c");
             command.add("model_reasoning_effort=" + tomlString(reasoningEffort));

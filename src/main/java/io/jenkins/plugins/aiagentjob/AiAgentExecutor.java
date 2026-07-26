@@ -56,20 +56,28 @@ final class AiAgentExecutor {
         EnvVars env = new EnvVars(stepEnv);
 
         String prompt = Util.replaceMacro(Util.fixNull(config.getPrompt()), env);
-        String model = Util.replaceMacro(Util.fixNull(config.getModel()), env);
-        String reasoningEffort = Util.replaceMacro(Util.fixNull(config.getReasoningEffort()), env);
+        String expandedModel = Util.replaceMacro(Util.fixNull(config.getModel()), env);
+        String expandedReasoningEffort =
+                Util.replaceMacro(Util.fixNull(config.getReasoningEffort()), env);
         String workDirValue = Util.replaceMacro(Util.fixNull(config.getWorkingDirectory()), env);
         String executablePath =
                 Util.replaceMacro(Util.fixNull(config.getExecutablePath()), env).trim();
         String commandOverride = Util.fixNull(config.getCommandOverride()).trim();
+        AiAgentTypeHandler agent = config.getAgent();
+        AiAgentTypeHandler.ModelSelection modelSelection =
+                agent.resolveModelSelection(expandedModel, expandedReasoningEffort);
+        String model = modelSelection.getModel();
+        String reasoningEffort = modelSelection.getReasoningEffort();
+        AiAgentConfiguration commandConfig =
+                new ResolvedAiAgentConfiguration(
+                        config, expandedModel, expandedReasoningEffort, executablePath);
         AiAgentConfiguration resolvedConfig =
                 new ResolvedAiAgentConfiguration(config, model, reasoningEffort, executablePath);
-        AiAgentTypeHandler agent = resolvedConfig.getAgent();
         agent.validateExecution(resolvedConfig);
         boolean manualApprovals =
                 resolvedConfig.isRequireApprovals() && !resolvedConfig.isYoloMode();
         AiAgentTypeHandler.AcpExecutionSpec acpExecution =
-                manualApprovals ? agent.buildAcpExecution(resolvedConfig) : null;
+                manualApprovals ? agent.buildAcpExecution(commandConfig) : null;
         if (manualApprovals && acpExecution == null) {
             throw new IllegalArgumentException(
                     "Manual approvals require an ACP-capable agent command.");
@@ -141,7 +149,7 @@ final class AiAgentExecutor {
                         AiAgentCommandFactory.applyExecutablePath(
                                 acpExecution.getCommand(), resolvedConfig.getExecutablePath());
             } else {
-                agentCommand = AiAgentCommandFactory.buildDefaultCommand(resolvedConfig, prompt);
+                agentCommand = AiAgentCommandFactory.buildDefaultCommand(commandConfig, prompt);
             }
 
             boolean needsShellEnvironmentBootstrap =

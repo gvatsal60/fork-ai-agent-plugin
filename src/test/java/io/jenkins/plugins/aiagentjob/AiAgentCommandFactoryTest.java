@@ -108,6 +108,28 @@ class AiAgentCommandFactoryTest {
         assertEquals("xhigh", cmd.get(effortIdx + 1));
     }
 
+    @Test
+    void claudeCode_withModelReasoningSuffix() {
+        AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
+        project.setModel("claude-opus-4:high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("claude-opus-4", cmd.get(cmd.indexOf("--model") + 1));
+        assertEquals("high", cmd.get(cmd.indexOf("--effort") + 1));
+    }
+
+    @Test
+    void claudeCode_preservesUnsupportedReasoningSuffix() {
+        AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
+        project.setModel("claude-opus-4:ultra");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("claude-opus-4:ultra", cmd.get(cmd.indexOf("--model") + 1));
+        assertFalse(cmd.contains("--effort"));
+    }
+
     // ======================== Codex Command Tests ========================
 
     @Test
@@ -197,6 +219,40 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
+    void codex_withModelReasoningSuffix() {
+        AiAgentBuilder project = createProject(new CodexAgentHandler());
+        project.setModel("gpt-5.6-sol:xhigh");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("gpt-5.6-sol", cmd.get(cmd.indexOf("--model") + 1));
+        assertEquals("model_reasoning_effort=\"xhigh\"", cmd.get(cmd.indexOf("-c") + 1));
+    }
+
+    @Test
+    void codex_reasoningFieldOverridesModelSuffix() {
+        AiAgentBuilder project = createProject(new CodexAgentHandler());
+        project.setModel("gpt-5.6-sol:xhigh");
+        project.setReasoningEffort("medium");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("gpt-5.6-sol", cmd.get(cmd.indexOf("--model") + 1));
+        assertEquals("model_reasoning_effort=\"medium\"", cmd.get(cmd.indexOf("-c") + 1));
+    }
+
+    @Test
+    void codex_preservesUnsupportedReasoningSuffix() {
+        AiAgentBuilder project = createProject(new CodexAgentHandler());
+        project.setModel("gpt-5.6-sol:minimal");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("gpt-5.6-sol:minimal", cmd.get(cmd.indexOf("--model") + 1));
+        assertFalse(cmd.contains("-c"));
+    }
+
+    @Test
     void codex_promptIsLastArgument() {
         AiAgentBuilder project = createProject(new CodexAgentHandler());
 
@@ -267,6 +323,16 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
+    void cursorAgent_preservesReasoningLikeModelSuffix() {
+        AiAgentBuilder project = createProject(new CursorAgentHandler());
+        project.setModel("cursor-model:high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("cursor-model:high", cmd.get(cmd.indexOf("--model") + 1));
+    }
+
+    @Test
     void cursorAgent_manualApprovalsAreRejected() {
         AiAgentBuilder project = createProject(new CursorAgentHandler());
         project.setRequireApprovals(true);
@@ -319,6 +385,39 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
+    void openCode_withModelReasoningSuffix() {
+        AiAgentBuilder project = createProject(new OpenCodeAgentHandler());
+        project.setModel("openai/gpt-5.6-terra:ultra");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("openai/gpt-5.6-terra", cmd.get(cmd.indexOf("--model") + 1));
+        assertEquals("ultra", cmd.get(cmd.indexOf("--variant") + 1));
+    }
+
+    @Test
+    void openCode_preservesNonReasoningModelSuffix() {
+        AiAgentBuilder project = createProject(new OpenCodeAgentHandler());
+        project.setModel("openrouter/example/model:free");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("openrouter/example/model:free", cmd.get(cmd.indexOf("--model") + 1));
+        assertFalse(cmd.contains("--variant"));
+    }
+
+    @Test
+    void openCode_preservesEscapedReasoningLikeModelSuffix() {
+        AiAgentBuilder project = createProject(new OpenCodeAgentHandler());
+        project.setModel("provider/example/model::high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("provider/example/model:high", cmd.get(cmd.indexOf("--model") + 1));
+        assertFalse(cmd.contains("--variant"));
+    }
+
+    @Test
     void openCode_acpExecutionMapsRunOptionsToSessionConfig() {
         OpenCodeAgentHandler handler = new OpenCodeAgentHandler();
         AiAgentBuilder project = createProject(handler);
@@ -334,6 +433,18 @@ class AiAgentCommandFactoryTest {
                 AiAgentCommandFactory.applyExecutablePath(
                         execution.getCommand(), project.getExecutablePath()));
         assertEquals("override/model", execution.getModel());
+        assertEquals("xhigh", execution.getReasoningEffort());
+    }
+
+    @Test
+    void openCode_acpExecutionMapsModelReasoningSuffixToSessionConfig() {
+        OpenCodeAgentHandler handler = new OpenCodeAgentHandler();
+        AiAgentBuilder project = createProject(handler);
+        project.setModel("openai/gpt-5.6-sol:xhigh");
+
+        AiAgentTypeHandler.AcpExecutionSpec execution = handler.buildAcpExecution(project);
+
+        assertEquals("openai/gpt-5.6-sol", execution.getModel());
         assertEquals("xhigh", execution.getReasoningEffort());
     }
 
@@ -399,6 +510,16 @@ class AiAgentCommandFactoryTest {
         int modelIdx = cmd.indexOf("-m");
         assertTrue(modelIdx >= 0, "Should have -m");
         assertEquals("gemini-2.5-flash", cmd.get(modelIdx + 1));
+    }
+
+    @Test
+    void geminiCli_preservesReasoningLikeModelSuffix() {
+        AiAgentBuilder project = createProject(new GeminiCliAgentHandler());
+        project.setModel("gemini-model:high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertEquals("gemini-model:high", cmd.get(cmd.indexOf("-m") + 1));
     }
 
     // ======================== Extra Args Tests ========================
