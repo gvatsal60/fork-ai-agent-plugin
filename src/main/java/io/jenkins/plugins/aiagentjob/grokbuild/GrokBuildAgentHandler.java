@@ -8,10 +8,18 @@ import io.jenkins.plugins.aiagentjob.AiAgentConfiguration;
 import io.jenkins.plugins.aiagentjob.AiAgentLogFormat;
 import io.jenkins.plugins.aiagentjob.AiAgentStatsExtractor;
 import io.jenkins.plugins.aiagentjob.AiAgentTypeHandler;
+import io.jenkins.plugins.aiagentjob.LogFormatUtils;
+
+import net.sf.json.JSONObject;
 
 import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -181,7 +189,47 @@ public final class GrokBuildAgentHandler extends AiAgentTypeHandler {
                 "",
                 "",
                 Map.of(config.getEffectiveApiKeyEnvVar(), "xai.api_key"),
-                List.of("cached_token"));
+                List.of("xai.api_key", "cached_token"));
+    }
+
+    public int resolveExitCode(int processExitCode, File rawLogFile) {
+        if (processExitCode != 0 || rawLogFile == null || !rawLogFile.exists()) {
+            return processExitCode;
+        }
+
+        try (BufferedReader reader =
+                Files.newBufferedReader(rawLogFile.toPath(), StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+                    continue;
+                }
+                try {
+                    if (isTerminalFailure(JSONObject.fromObject(trimmed))) {
+                        return 1;
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+        } catch (IOException ignored) {
+            return processExitCode;
+        }
+        return processExitCode;
+    }
+
+    private static boolean isTerminalFailure(JSONObject json) {
+        String type = LogFormatUtils.normalize(json.optString("type", ""));
+        if ("error".equals(type) || "max_turns_reached".equals(type)) {
+            return true;
+        }
+        if (!"end".equals(type)) {
+            return false;
+        }
+        String stopReason =
+                LogFormatUtils.normalize(
+                        LogFormatUtils.firstNonEmpty(json, "stopReason", "stop_reason"));
+        return "cancelled".equals(stopReason) || "canceled".equals(stopReason);
     }
 
     private static boolean startsWithHeadlessOnlyOption(String arg) {

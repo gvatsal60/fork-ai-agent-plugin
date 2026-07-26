@@ -33,6 +33,7 @@ import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -45,6 +46,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @WithJenkins
@@ -937,6 +939,60 @@ class AiAgentBuildExecutionTest {
         assertEquals(900, stats.getCacheReadTokens());
         assertEquals(1280, stats.getTotalTokens());
         assertEquals("grok-4.5-build", stats.getDetectedModel());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void grokBuildHeadless_terminalFailuresPropagateWithFailOnAgentError(JenkinsRule jenkins)
+            throws Exception {
+        Assumptions.assumeTrue(
+                coreExitCodeResolverAvailable(),
+                "Requires AiAgentTypeHandler.resolveExitCode from PR #34");
+        List<Map.Entry<String, String>> failureEvents =
+                List.of(
+                        Map.entry(
+                                "cancelled",
+                                "{\"type\":\"end\",\"stopReason\":\"Cancelled\",\"usage\":{\"inputTokens\":1630,\"outputTokens\":32}}"),
+                        Map.entry("max-turns", "{\"type\":\"max_turns_reached\",\"maxTurns\":4}"),
+                        Map.entry("error", "{\"type\":\"error\",\"message\":\"request failed\"}"));
+
+        for (Map.Entry<String, String> failureEvent : failureEvents) {
+            String caseName = failureEvent.getKey();
+            File fakeBin =
+                    installExecutable(
+                            jenkins,
+                            "fake-grok-" + caseName + "-bin",
+                            "grok",
+                            "#!/bin/sh\nprintf '%s\\n' '" + failureEvent.getValue() + "'\n");
+            String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+            FreeStyleProject project =
+                    newProject(
+                            jenkins,
+                            "ai-build-grok-" + caseName,
+                            b -> {
+                                b.setAgent(new GrokBuildAgentHandler());
+                                b.setPrompt("trigger " + caseName);
+                                b.setEnvironmentVariables("PATH=" + path);
+                                b.setSetupScript("true");
+                                b.setDisableInteractive(true);
+                                b.setFailOnAgentError(true);
+                            });
+
+            FreeStyleBuild build = project.scheduleBuild2(0).get();
+            jenkins.assertBuildStatus(Result.FAILURE, build);
+            AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+            assertNotNull(action);
+            assertEquals(Integer.valueOf(1), action.getExitCode(), caseName);
+        }
+    }
+
+    private static boolean coreExitCodeResolverAvailable() {
+        try {
+            AiAgentTypeHandler.class.getDeclaredMethod("resolveExitCode", int.class, File.class);
+            return true;
+        } catch (NoSuchMethodException ignored) {
+            return false;
+        }
     }
 
     @Test

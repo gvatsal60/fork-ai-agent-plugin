@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.Proc;
 
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -102,6 +104,47 @@ class AcpClientSessionTest {
                             Map.of()));
             assertTrue(proc.stdinText().contains("\"methodId\":\"cached_token\""));
             assertFalse(proc.stdinText().contains("\"methodId\":\"xai.api_key\""));
+        } finally {
+            proc.kill();
+        }
+    }
+
+    @Test
+    void usesAdvertisedApiKeyWhenConfiguredOutsideProcessEnvironment(JenkinsRule jenkins)
+            throws Exception {
+        String responses =
+                """
+                {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"xai.api_key"}]}}
+                {"jsonrpc":"2.0","id":2,"result":{}}
+                {"jsonrpc":"2.0","id":3,"result":{"sessionId":"session-1"}}
+                {"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}
+                """;
+        FakeProc proc = new FakeProc(responses, false);
+        AiAgentBuilder config = new AiAgentBuilder();
+        config.setAgent(new GrokBuildAgentHandler());
+        AiAgentTypeHandler.AcpExecutionSpec execution = config.getAgent().buildAcpExecution(config);
+
+        try (AiAgentExecutor.AgentOutputHandler output = newOutputHandler()) {
+            AcpClientSession session =
+                    new AcpClientSession(
+                            proc,
+                            proc.getStdout(),
+                            proc.getStdin(),
+                            output,
+                            new ExecutionRegistry.LiveExecution(),
+                            Duration.ofSeconds(1),
+                            Duration.ofSeconds(1));
+
+            assertTrue(
+                    session.execute(
+                            tempDirectory.toString(),
+                            "respond done",
+                            "",
+                            "",
+                            execution.getAuthenticationMethods(),
+                            execution.getFallbackAuthenticationMethods(),
+                            Map.of()));
+            assertTrue(proc.stdinText().contains("\"methodId\":\"xai.api_key\""));
         } finally {
             proc.kill();
         }

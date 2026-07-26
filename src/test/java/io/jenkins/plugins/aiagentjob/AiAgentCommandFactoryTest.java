@@ -546,7 +546,9 @@ class AiAgentCommandFactoryTest {
         assertEquals("", execution.getModel());
         assertEquals("", execution.getReasoningEffort());
         assertEquals("xai.api_key", execution.getAuthenticationMethods().get("GROK_API_TOKEN"));
-        assertEquals(List.of("cached_token"), execution.getFallbackAuthenticationMethods());
+        assertEquals(
+                List.of("xai.api_key", "cached_token"),
+                execution.getFallbackAuthenticationMethods());
     }
 
     // ======================== Gemini CLI Command Tests ========================
