@@ -76,11 +76,11 @@ public final class CodexLogFormat implements AiAgentLogFormat {
                 return AiAgentLogParser.ParsedLine.toolCall(
                         lineNumber, toolName, toolInput, rawDetails, toolCallId);
             }
+            String toolInput = itemType.contains("command_execution") ? extractToolInput(item) : "";
             String toolOutput = extractToolOutput(item);
-            if (toolOutput.isEmpty()) {
+            if (toolInput.isEmpty() && toolOutput.isEmpty()) {
                 return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
             }
-            String toolInput = itemType.contains("command_execution") ? extractToolInput(item) : "";
             return AiAgentLogParser.ParsedLine.toolResult(
                     lineNumber, toolName, toolInput, toolOutput, rawDetails, toolCallId);
         }

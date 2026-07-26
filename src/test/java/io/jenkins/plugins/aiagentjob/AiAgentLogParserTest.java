@@ -213,7 +213,7 @@ class AiAgentLogParserTest {
                 cats.contains("tool_result"),
                 "Should have tool_result (command_execution completed)");
         assertTrue(cats.contains("assistant"), "Should have assistant (agent_message)");
-        assertEquals(16, events.size(), "Current Codex fixture should keep 16 visible events");
+        assertEquals(17, events.size(), "Current Codex fixture should keep 17 visible events");
     }
 
     @Test
@@ -234,13 +234,13 @@ class AiAgentLogParserTest {
     }
 
     @Test
-    void codexConversation_hidesCompletionsWithoutOutput() throws IOException {
+    void codexConversation_showsCommandCompletionsWithoutOutput() throws IOException {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("codex-conversation.jsonl", CodexLogFormat.INSTANCE);
         long started = events.stream().filter(e -> "tool_call".equals(e.getCategory())).count();
         long completed = events.stream().filter(e -> "tool_result".equals(e.getCategory())).count();
         assertEquals(6, started, "Fixture should keep command and MCP starts visible");
-        assertEquals(5, completed, "Empty command completion should not render a result");
+        assertEquals(6, completed, "Command completions should render even without output");
     }
 
     @Test
@@ -252,7 +252,7 @@ class AiAgentLogParserTest {
                         .filter(e -> "tool_result".equals(e.getCategory()))
                         .collect(Collectors.toList());
 
-        assertEquals(5, toolResults.size(), "Should have 5 visible tool results");
+        assertEquals(6, toolResults.size(), "Should have 6 visible tool results");
         assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("README.md")));
         assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("sample-plugin")));
         assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("1 failed")));
@@ -264,10 +264,17 @@ class AiAgentLogParserTest {
                 toolResults.stream()
                         .filter(e -> "bash".equals(e.getLabel()))
                         .collect(Collectors.toList());
-        assertEquals(4, commandResults.size(), "Should have 4 completed commands with output");
+        assertEquals(5, commandResults.size(), "Should have 5 completed commands");
         assertTrue(
                 commandResults.stream().allMatch(e -> !e.getToolInput().isEmpty()),
                 "Completed Codex commands should preserve their command input");
+        assertTrue(
+                commandResults.stream()
+                        .anyMatch(
+                                e ->
+                                        e.getToolInput().contains("mvn -q")
+                                                && e.getToolOutput().isEmpty()),
+                "Successful silent commands should render their command input");
         AiAgentLogParser.EventView mcpResult =
                 toolResults.stream()
                         .filter(e -> "list_mcp_resources".equals(e.getLabel()))
@@ -792,7 +799,7 @@ class AiAgentLogParserTest {
     void codexConversation_hasCorrectEventCount() throws IOException {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("codex-conversation.jsonl", CodexLogFormat.INSTANCE);
-        assertEquals(16, events.size(), "Current Codex fixture should produce 16 visible events");
+        assertEquals(17, events.size(), "Current Codex fixture should produce 17 visible events");
     }
 
     @Test
