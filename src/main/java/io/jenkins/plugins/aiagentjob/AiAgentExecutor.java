@@ -159,6 +159,7 @@ final class AiAgentExecutor {
             boolean disableInteractive =
                     resolvedConfig.isDisableInteractive() && acpExecution == null;
             List<String> command;
+            boolean waitForAcpProcessReady = false;
             if ((!setupScript.isEmpty() && launcher.isUnix()) || needsShellEnvironmentBootstrap) {
                 String combinedScript =
                         buildCombinedScript(
@@ -168,9 +169,11 @@ final class AiAgentExecutor {
                                 commandOverride,
                                 acpExecution == null
                                         ? List.of()
-                                        : acpExecution.getAuthenticationMethods().keySet());
+                                        : acpExecution.getAuthenticationMethods().keySet(),
+                                acpExecution != null);
                 tempSetupScript = writeTempScript(workspace, combinedScript);
                 command = buildShellCommand(combinedScript, tempSetupScript);
+                waitForAcpProcessReady = acpExecution != null;
             } else if (!commandOverride.isEmpty()) {
                 if (launcher.isUnix()) {
                     // Use a non-login shell so injected HOME/USERPROFILE are not overridden.
@@ -234,7 +237,8 @@ final class AiAgentExecutor {
                                         liveExecution,
                                         approvalTimeout,
                                         prompt,
-                                        acpExecution);
+                                        acpExecution,
+                                        waitForAcpProcessReady);
                     } else {
                         Launcher.ProcStarter procStarter =
                                 launcher.launch()
@@ -321,7 +325,8 @@ final class AiAgentExecutor {
             ExecutionRegistry.LiveExecution liveExecution,
             Duration approvalTimeout,
             String prompt,
-            AiAgentTypeHandler.AcpExecutionSpec acpExecution)
+            AiAgentTypeHandler.AcpExecutionSpec acpExecution,
+            boolean waitForProcessReady)
             throws IOException, InterruptedException {
         Proc proc =
                 startProcess(
@@ -361,7 +366,8 @@ final class AiAgentExecutor {
                             outputHandler,
                             liveExecution,
                             approvalTimeout,
-                            ACP_PROTOCOL_REQUEST_TIMEOUT);
+                            ACP_PROTOCOL_REQUEST_TIMEOUT,
+                            waitForProcessReady);
             return session.execute(
                             runDirectory.getRemote(),
                             prompt,
@@ -438,12 +444,19 @@ final class AiAgentExecutor {
             Map<String, String> shellEnvironment,
             List<String> agentCommand,
             String commandOverride,
-            Iterable<String> acpAuthenticationEnvironmentVariables) {
+            Iterable<String> acpAuthenticationEnvironmentVariables,
+            boolean acpMode) {
         StringBuilder sb = new StringBuilder();
         appendShebangAwarePreamble(sb, setupScript, shellEnvironment);
         sb.append("set +x\n");
+        if (acpMode) {
+            sb.append("printf '\\n'\n");
+        }
         appendAcpAuthenticationMarkers(sb, acpAuthenticationEnvironmentVariables);
         if (!commandOverride.isEmpty()) {
+            if (acpMode) {
+                appendAcpProcessReadyMarker(sb);
+            }
             String cmd = commandOverride;
             sb.append(cmd);
             if (!cmd.endsWith("\n")) {
@@ -451,6 +464,9 @@ final class AiAgentExecutor {
             }
         } else {
             appendExecutableCheck(sb, agentCommand.get(0));
+            if (acpMode) {
+                appendAcpProcessReadyMarker(sb);
+            }
             sb.append("exec");
             for (String token : agentCommand) {
                 sb.append(' ').append(shellQuote(token));
@@ -490,6 +506,14 @@ final class AiAgentExecutor {
             sb.append("  printf '%s\\n' ").append(shellQuote(marker)).append('\n');
             sb.append("fi\n");
         }
+    }
+
+    private static void appendAcpProcessReadyMarker(StringBuilder sb) {
+        String marker =
+                "{\"jsonrpc\":\"2.0\",\"method\":\""
+                        + AcpClientSession.PROCESS_READY_METHOD
+                        + "\"}";
+        sb.append("printf '%s\\n' ").append(shellQuote(marker)).append('\n');
     }
 
     private static void appendShebangAwarePreamble(

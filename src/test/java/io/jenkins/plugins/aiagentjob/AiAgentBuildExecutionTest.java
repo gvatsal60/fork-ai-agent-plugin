@@ -942,7 +942,7 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
-    void grokBuildHeadless_terminalFailuresPropagateWithFailOnAgentError(JenkinsRule jenkins)
+    void grokBuild_terminalFailuresPropagateWithFailOnAgentError(JenkinsRule jenkins)
             throws Exception {
         List<Map.Entry<String, String>> failureEvents =
                 List.of(
@@ -950,6 +950,9 @@ class AiAgentBuildExecutionTest {
                                 "cancelled",
                                 "{\"type\":\"end\",\"stopReason\":\"Cancelled\",\"usage\":{\"inputTokens\":10,\"outputTokens\":2}}"),
                         Map.entry("max-turns", "{\"type\":\"max_turns_reached\",\"maxTurns\":4}"),
+                        Map.entry(
+                                "acp-max-tokens",
+                                "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"stopReason\":\"max_tokens\"}}"),
                         Map.entry("error", "{\"type\":\"error\",\"message\":\"request failed\"}"));
 
         for (Map.Entry<String, String> failureEvent : failureEvents) {
@@ -1001,7 +1004,8 @@ class AiAgentBuildExecutionTest {
                                     "PATH="
                                             + path
                                             + "\nGROK_FIXTURE_PERMISSION_INPUT=fixture-command");
-                            b.setSetupScript("export XAI_API_KEY=" + apiKey);
+                            b.setSetupScript(
+                                    "printf 'setup-progress'\nexport XAI_API_KEY=" + apiKey);
                             b.setFailOnAgentError(true);
                         });
 
@@ -1024,7 +1028,9 @@ class AiAgentBuildExecutionTest {
         assertNotNull(workspace);
         assertTrue(workspace.child("approved.txt").exists());
         String rawLog = Files.readString(action.getRawLogFile().toPath());
+        assertTrue(rawLog.contains("setup-progress"));
         assertFalse(rawLog.contains(AcpClientSession.AUTH_ENVIRONMENT_METHOD));
+        assertFalse(rawLog.contains(AcpClientSession.PROCESS_READY_METHOD));
         assertFalse(rawLog.contains(apiKey));
         assertFalse(jenkins.getLog(build).contains(apiKey));
     }

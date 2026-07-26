@@ -218,6 +218,14 @@ public final class GrokBuildAgentHandler extends AiAgentTypeHandler {
     }
 
     private static boolean isTerminalFailure(JSONObject json) {
+        JSONObject result = json.optJSONObject("result");
+        String acpStopReason =
+                LogFormatUtils.normalize(
+                        LogFormatUtils.firstNonEmpty(result, "stopReason", "stop_reason"));
+        if (!acpStopReason.isEmpty()) {
+            return !"end_turn".equals(acpStopReason);
+        }
+
         String type = LogFormatUtils.normalize(json.optString("type", ""));
         if ("error".equals(type) || "max_turns_reached".equals(type)) {
             return true;
@@ -228,7 +236,9 @@ public final class GrokBuildAgentHandler extends AiAgentTypeHandler {
         String stopReason =
                 LogFormatUtils.normalize(
                         LogFormatUtils.firstNonEmpty(json, "stopReason", "stop_reason"));
-        return "cancelled".equals(stopReason) || "canceled".equals(stopReason);
+        return !stopReason.isEmpty()
+                && !"endturn".equals(stopReason)
+                && !"end_turn".equals(stopReason);
     }
 
     private static boolean startsWithHeadlessOnlyOption(String arg) {

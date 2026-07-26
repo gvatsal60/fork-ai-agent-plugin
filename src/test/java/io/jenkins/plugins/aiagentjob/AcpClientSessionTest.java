@@ -190,6 +190,43 @@ class AcpClientSessionTest {
     }
 
     @Test
+    void startsProtocolTimeoutAfterProcessReadyMarker(JenkinsRule jenkins) throws Exception {
+        String responses =
+                """
+                {"jsonrpc":"2.0","method":"ai-agent/process_ready"}
+                {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}
+                {"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}
+                {"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}
+                """;
+        FakeProc proc = new FakeProc(responses, false, Duration.ofMillis(250));
+
+        try (AiAgentExecutor.AgentOutputHandler output = newOutputHandler()) {
+            AcpClientSession session =
+                    new AcpClientSession(
+                            proc,
+                            proc.getStdout(),
+                            proc.getStdin(),
+                            output,
+                            new ExecutionRegistry.LiveExecution(),
+                            Duration.ofSeconds(1),
+                            Duration.ofMillis(50),
+                            true);
+
+            assertTrue(
+                    session.execute(
+                            tempDirectory.toString(),
+                            "respond done",
+                            "",
+                            "",
+                            Map.of(),
+                            List.of(),
+                            Map.of()));
+        } finally {
+            proc.kill();
+        }
+    }
+
+    @Test
     void doesNotFallBackToCachedIdentityAfterApiKeyFailure(JenkinsRule jenkins) throws Exception {
         String responses =
                 """
@@ -246,11 +283,45 @@ class AcpClientSessionTest {
         private volatile boolean alive = true;
 
         FakeProc(String responses, boolean keepOutputOpen) throws IOException {
+            this(responses, keepOutputOpen, Duration.ZERO);
+        }
+
+        FakeProc(String responses, boolean keepOutputOpen, Duration delay) throws IOException {
             serverOutput = new PipedOutputStream(stdout);
+            if (!delay.isZero()) {
+                Thread writer =
+                        new Thread(
+                                () -> {
+                                    try {
+                                        Thread.sleep(delay.toMillis());
+                                        writeResponses(responses, keepOutputOpen);
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                        closeServerOutput();
+                                    } catch (IOException e) {
+                                        closeServerOutput();
+                                    }
+                                },
+                                "fake-acp-response-writer");
+                writer.setDaemon(true);
+                writer.start();
+                return;
+            }
+            writeResponses(responses, keepOutputOpen);
+        }
+
+        private void writeResponses(String responses, boolean keepOutputOpen) throws IOException {
             serverOutput.write(responses.getBytes(StandardCharsets.UTF_8));
             serverOutput.flush();
             if (!keepOutputOpen) {
                 serverOutput.close();
+            }
+        }
+
+        private void closeServerOutput() {
+            try {
+                serverOutput.close();
+            } catch (IOException ignored) {
             }
         }
 

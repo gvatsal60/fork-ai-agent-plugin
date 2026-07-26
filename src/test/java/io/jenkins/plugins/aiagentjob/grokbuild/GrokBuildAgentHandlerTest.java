@@ -23,6 +23,9 @@ class GrokBuildAgentHandlerTest {
                                 "cancelled",
                                 "{\"type\":\"end\",\"stopReason\":\"Cancelled\",\"usage\":{\"inputTokens\":10,\"outputTokens\":2}}"),
                         Map.entry("max-turns", "{\"type\":\"max_turns_reached\",\"maxTurns\":4}"),
+                        Map.entry(
+                                "acp-max-tokens",
+                                "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"stopReason\":\"max_tokens\"}}"),
                         Map.entry("error", "{\"type\":\"error\",\"message\":\"request failed\"}"));
 
         for (Map.Entry<String, String> failureEvent : failureEvents) {
@@ -37,7 +40,10 @@ class GrokBuildAgentHandlerTest {
     void preservesSuccessfulAndNonZeroProcessExits() throws Exception {
         GrokBuildAgentHandler handler = new GrokBuildAgentHandler();
         Path rawLog = tempDirectory.resolve("success.jsonl");
-        Files.writeString(rawLog, "{\"type\":\"end\",\"stopReason\":\"EndTurn\"}\n");
+        Files.writeString(
+                rawLog,
+                "{\"type\":\"end\",\"stopReason\":\"EndTurn\"}\n"
+                        + "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"stopReason\":\"end_turn\"}}\n");
 
         assertEquals(0, handler.resolveExitCode(0, rawLog.toFile()));
         assertEquals(17, handler.resolveExitCode(17, rawLog.toFile()));
