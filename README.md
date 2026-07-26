@@ -60,7 +60,7 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
 2. Add/configure the **Run AI Agent** build step:
    - **Agent Type** — select the coding agent to run.
    - **Prompt** — the task to send to the agent.
-   - **Model** — optional model override. Codex, Claude Code, OpenCode, and Antigravity CLI accept `model:effort` shorthand (e.g., `gpt-5.6-sol:xhigh`).
+   - **Model** — optional model override. Codex, Claude Code, and OpenCode accept `model:effort` shorthand such as `gpt-5.6-sol:xhigh`; Antigravity CLI accepts `low`, `medium`, or `high`, such as `gemini-3.6-flash:high`.
    - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`); takes precedence over the model suffix.
    - **YOLO mode** — skip confirmation prompts in the agent.
    - **Approvals** — require human approval for tool calls.
