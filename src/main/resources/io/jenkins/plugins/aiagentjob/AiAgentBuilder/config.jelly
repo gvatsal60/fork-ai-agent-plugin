@@ -18,6 +18,10 @@
     <f:textbox />
   </f:entry>
 
+  <f:entry title="Executable path (optional)" field="executablePath">
+    <f:textbox />
+  </f:entry>
+
   <f:entry title="Enable YOLO mode" field="yoloMode">
     <f:checkbox />
   </f:entry>

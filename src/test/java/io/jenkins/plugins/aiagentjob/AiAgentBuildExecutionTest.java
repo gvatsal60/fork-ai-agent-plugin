@@ -584,6 +584,91 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void executablePathRunsAgentOutsidePath(JenkinsRule jenkins) throws Exception {
+        File fakeBin =
+                installExecutable(
+                        jenkins,
+                        "custom-codex-bin",
+                        "custom-codex",
+                        "#!/bin/sh\nprintf '%s\\n' "
+                                + "'{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\","
+                                + "\"text\":\"custom executable ran\"}}'\n");
+        String executable = new File(fakeBin, "custom-codex").getAbsolutePath();
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-custom-executable",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setExecutablePath("${CUSTOM_AGENT_EXECUTABLE}");
+                        });
+        project.addProperty(
+                new ParametersDefinitionProperty(
+                        new StringParameterDefinition("CUSTOM_AGENT_EXECUTABLE", executable)));
+
+        FreeStyleBuild build =
+                project.scheduleBuild2(
+                                0,
+                                new ParametersAction(
+                                        new StringParameterValue(
+                                                "CUSTOM_AGENT_EXECUTABLE", executable)))
+                        .get();
+
+        jenkins.assertBuildStatusSuccess(build);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        assertTrue(
+                Files.readString(action.getRawLogFile().toPath())
+                        .contains("custom executable ran"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void missingExecutableReportsConfigurationGuidance(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-missing-executable",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setExecutablePath("/definitely/missing/ai-agent-codex");
+                        });
+
+        FreeStyleBuild build = project.scheduleBuild2(0).get();
+
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        String log = jenkins.getLog(build);
+        assertTrue(log.contains("Failed to start executable '/definitely/missing/ai-agent-codex'"));
+        assertTrue(log.contains("configure Executable path or update PATH"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void setupScriptMissingExecutableReportsShellGuidance(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-setup-missing-executable",
+                        b -> {
+                            b.setAgent(new CodexAgentHandler());
+                            b.setPrompt("test");
+                            b.setExecutablePath("definitely-missing-ai-agent-codex");
+                            b.setSetupScript("true");
+                        });
+
+        FreeStyleBuild build = project.scheduleBuild2(0).get();
+
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        String log = jenkins.getLog(build);
+        assertTrue(
+                log.contains("Agent executable 'definitely-missing-ai-agent-codex' was not found"));
+        assertTrue(log.contains("Setup scripts without a shebang run with /bin/sh -e"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void processLaunchFailureCompletesInvocationMetadata(JenkinsRule jenkins) throws Exception {
         FreeStyleProject project =
                 newProject(
@@ -622,8 +707,8 @@ class AiAgentBuildExecutionTest {
                 .next()
                 .addCredentials(Domain.global(), credential);
         File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-bin");
+        String executable = new File(fakeBin, "opencode").getAbsolutePath();
 
-        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
         FreeStyleProject project =
                 newProject(
                         jenkins,
@@ -637,8 +722,8 @@ class AiAgentBuildExecutionTest {
                             b.setApiEnvVarName("FAKE_ACP_SECRET_INPUT");
                             b.setModel("test/provider-model");
                             b.setExtraArgs("--variant high --format json --pure");
+                            b.setExecutablePath(executable);
                             b.setSetupScript("cd \"${WORKSPACE}\"");
-                            b.setEnvironmentVariables("PATH=" + path);
                             b.setFailOnAgentError(true);
                         });
         DumbSlave agent = jenkins.createOnlineSlave();

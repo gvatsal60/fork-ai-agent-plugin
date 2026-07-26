@@ -24,7 +24,20 @@ final class AiAgentCommandFactory {
         if (extraArgs != null) {
             Collections.addAll(command, Util.tokenize(extraArgs));
         }
-        return command;
+        return applyExecutablePath(command, config.getExecutablePath());
+    }
+
+    static List<String> applyExecutablePath(List<String> command, String executablePath) {
+        String executable = Util.fixEmptyAndTrim(executablePath);
+        if (executable == null) {
+            return command;
+        }
+        if (command.isEmpty()) {
+            throw new IllegalStateException("Agent command is empty.");
+        }
+        List<String> resolved = new ArrayList<>(command);
+        resolved.set(0, executable);
+        return resolved;
     }
 
     static Map<String, String> parseEnvironmentVariables(String raw) {

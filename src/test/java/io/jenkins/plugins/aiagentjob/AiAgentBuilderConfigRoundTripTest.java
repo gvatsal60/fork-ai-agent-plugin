@@ -32,6 +32,7 @@ class AiAgentBuilderConfigRoundTripTest {
         builder.setModel("gemini-2.5-pro");
         builder.setReasoningEffort("high");
         builder.setWorkingDirectory("src");
+        builder.setExecutablePath("/opt/agents/gemini");
         builder.setYoloMode(false);
         builder.setRequireApprovals(true);
         builder.setApprovalTimeoutSeconds(42);
@@ -52,6 +53,7 @@ class AiAgentBuilderConfigRoundTripTest {
         assertEquals("gemini-2.5-pro", reloaded.getModel());
         assertEquals("high", reloaded.getReasoningEffort());
         assertEquals("src", reloaded.getWorkingDirectory());
+        assertEquals("/opt/agents/gemini", reloaded.getExecutablePath());
         assertFalse(reloaded.isYoloMode());
         assertTrue(reloaded.isRequireApprovals());
         assertEquals(42, reloaded.getApprovalTimeoutSeconds());

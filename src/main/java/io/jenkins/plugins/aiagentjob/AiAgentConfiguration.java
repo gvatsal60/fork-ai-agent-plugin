@@ -12,6 +12,10 @@ public interface AiAgentConfiguration {
 
     String getWorkingDirectory();
 
+    default String getExecutablePath() {
+        return "";
+    }
+
     boolean isYoloMode();
 
     boolean isRequireApprovals();

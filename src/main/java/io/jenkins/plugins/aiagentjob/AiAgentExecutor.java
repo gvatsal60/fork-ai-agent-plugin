@@ -59,9 +59,11 @@ final class AiAgentExecutor {
         String model = Util.replaceMacro(Util.fixNull(config.getModel()), env);
         String reasoningEffort = Util.replaceMacro(Util.fixNull(config.getReasoningEffort()), env);
         String workDirValue = Util.replaceMacro(Util.fixNull(config.getWorkingDirectory()), env);
+        String executablePath =
+                Util.replaceMacro(Util.fixNull(config.getExecutablePath()), env).trim();
         String commandOverride = Util.fixNull(config.getCommandOverride()).trim();
         AiAgentConfiguration resolvedConfig =
-                new ResolvedAiAgentConfiguration(config, model, reasoningEffort);
+                new ResolvedAiAgentConfiguration(config, model, reasoningEffort, executablePath);
         AiAgentTypeHandler agent = resolvedConfig.getAgent();
         agent.validateExecution(resolvedConfig);
         boolean manualApprovals =
@@ -135,7 +137,9 @@ final class AiAgentExecutor {
             if (!commandOverride.isEmpty()) {
                 agentCommand = List.of(commandOverride);
             } else if (acpExecution != null) {
-                agentCommand = acpExecution.getCommand();
+                agentCommand =
+                        AiAgentCommandFactory.applyExecutablePath(
+                                acpExecution.getCommand(), resolvedConfig.getExecutablePath());
             } else {
                 agentCommand = AiAgentCommandFactory.buildDefaultCommand(resolvedConfig, prompt);
             }
@@ -230,7 +234,7 @@ final class AiAgentExecutor {
                         if (disableInteractive) {
                             procStarter.stdin(InputStream.nullInputStream());
                         }
-                        Proc proc = procStarter.start();
+                        Proc proc = startProcess(procStarter, command.get(0));
                         outputHandler.attach(proc);
                         try {
                             exitCode = proc.join();
@@ -257,6 +261,9 @@ final class AiAgentExecutor {
                             ExecutionRegistry.unregister(run, invocationId);
                         }
                     }
+                }
+                if (exitCode == 127) {
+                    printCommandNotFoundGuidance(listener);
                 }
                 return exitCode;
             } catch (IOException | InterruptedException | RuntimeException | Error e) {
@@ -303,15 +310,16 @@ final class AiAgentExecutor {
             AiAgentTypeHandler.AcpExecutionSpec acpExecution)
             throws IOException, InterruptedException {
         Proc proc =
-                launcher.launch()
-                        .cmds(command)
-                        .pwd(runDirectory)
-                        .envs(procEnv)
-                        .readStdout()
-                        .readStderr()
-                        .writeStdin()
-                        .quiet(true)
-                        .start();
+                startProcess(
+                        launcher.launch()
+                                .cmds(command)
+                                .pwd(runDirectory)
+                                .envs(procEnv)
+                                .readStdout()
+                                .readStderr()
+                                .writeStdin()
+                                .quiet(true),
+                        command.get(0));
         outputHandler.attach(proc);
 
         InputStream stdout = proc.getStdout();
@@ -377,6 +385,31 @@ final class AiAgentExecutor {
         return thread;
     }
 
+    private static Proc startProcess(Launcher.ProcStarter procStarter, String executable)
+            throws IOException {
+        try {
+            return procStarter.start();
+        } catch (IOException e) {
+            throw new IOException(
+                    "Failed to start executable '"
+                            + executable
+                            + "'. Ensure it exists and is executable on the build node. Jenkins "
+                            + "does not load interactive shell startup files; configure Executable "
+                            + "path or update PATH in Additional environment variables or Setup "
+                            + "script.",
+                    e);
+        }
+    }
+
+    private static void printCommandNotFoundGuidance(TaskListener listener) {
+        listener.getLogger()
+                .println(
+                        "[ai-agent] Exit code 127 usually means a command was not found. Configure "
+                                + "Executable path or update PATH. Setup scripts without a shebang "
+                                + "run with /bin/sh -e; use '. file' there, or add #!/bin/bash or "
+                                + "#!/bin/zsh before using 'source'.");
+    }
+
     private static String buildCombinedScript(
             String setupScript,
             Map<String, String> shellEnvironment,
@@ -392,6 +425,7 @@ final class AiAgentExecutor {
                 sb.append('\n');
             }
         } else {
+            appendExecutableCheck(sb, agentCommand.get(0));
             sb.append("exec");
             for (String token : agentCommand) {
                 sb.append(' ').append(shellQuote(token));
@@ -399,6 +433,20 @@ final class AiAgentExecutor {
             sb.append('\n');
         }
         return sb.toString();
+    }
+
+    private static void appendExecutableCheck(StringBuilder sb, String executable) {
+        sb.append("if ! command -v ")
+                .append(shellQuote(executable))
+                .append(" >/dev/null 2>&1; then\n")
+                .append("  printf '%s\\n' ")
+                .append(
+                        shellQuote(
+                                "[ai-agent] Agent executable '"
+                                        + executable
+                                        + "' was not found. Configure Executable path or update "
+                                        + "PATH in Setup script."))
+                .append("\n  exit 127\nfi\n");
     }
 
     private static void appendShebangAwarePreamble(
@@ -498,12 +546,17 @@ final class AiAgentExecutor {
         private final AiAgentConfiguration delegate;
         private final String model;
         private final String reasoningEffort;
+        private final String executablePath;
 
         ResolvedAiAgentConfiguration(
-                AiAgentConfiguration delegate, String model, String reasoningEffort) {
+                AiAgentConfiguration delegate,
+                String model,
+                String reasoningEffort,
+                String executablePath) {
             this.delegate = delegate;
             this.model = model;
             this.reasoningEffort = reasoningEffort;
+            this.executablePath = executablePath;
         }
 
         @Override
@@ -529,6 +582,11 @@ final class AiAgentExecutor {
         @Override
         public String getWorkingDirectory() {
             return delegate.getWorkingDirectory();
+        }
+
+        @Override
+        public String getExecutablePath() {
+            return executablePath;
         }
 
         @Override
