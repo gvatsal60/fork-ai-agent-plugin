@@ -92,9 +92,15 @@ public final class AntigravityLogFormat implements AiAgentLogFormat {
                     .withDeduplicationKey("antigravity-tool-call:" + stepId);
         }
 
-        String output = LogFormatUtils.firstNonEmpty(toolInfo, "output", "error");
+        String output = LogFormatUtils.firstNonEmpty(toolInfo, "output");
         if (output.isEmpty()) {
-            output = LogFormatUtils.firstNonEmpty(update, "error");
+            output = errorMessage(toolInfo);
+        }
+        if (output.isEmpty()) {
+            output = errorMessage(update);
+        }
+        if (output.isEmpty() && isFailureState(state)) {
+            output = "Tool " + state;
         }
         if (output.isEmpty()) {
             return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
@@ -110,9 +116,9 @@ public final class AntigravityLogFormat implements AiAgentLogFormat {
             return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
         }
         String status = LogFormatUtils.firstNonEmpty(result, "status");
-        String error = LogFormatUtils.firstNonEmpty(result, "error");
+        String error = errorMessage(result);
         String response = LogFormatUtils.firstNonEmpty(result, "response");
-        boolean failed = !error.isEmpty() || "error".equals(LogFormatUtils.normalize(status));
+        boolean failed = !error.isEmpty() || isFailureState(LogFormatUtils.normalize(status));
         String content =
                 !error.isEmpty()
                         ? error
@@ -131,9 +137,25 @@ public final class AntigravityLogFormat implements AiAgentLogFormat {
                 lineNumber, failed ? "error" : "result", label, content, rawDetails);
     }
 
-    private static String stepId(JSONObject update) {
+    static String stepId(JSONObject update) {
         String conversationId = LogFormatUtils.firstNonEmpty(update, "conversation_id");
         String stepIndex = LogFormatUtils.firstNonEmpty(update, "step_index");
+        if (conversationId.isEmpty() || stepIndex.isEmpty()) {
+            return "";
+        }
         return conversationId + ':' + stepIndex;
+    }
+
+    static String errorMessage(JSONObject json) {
+        String error = LogFormatUtils.firstNonEmpty(json, "error");
+        if (!error.isEmpty() || json == null) {
+            return error;
+        }
+        JSONObject nested = json.optJSONObject("error");
+        return LogFormatUtils.firstNonEmpty(nested, "message", "reason", "details", "error");
+    }
+
+    static boolean isFailureState(String state) {
+        return "error".equals(state) || "failed".equals(state) || "cancelled".equals(state);
     }
 }

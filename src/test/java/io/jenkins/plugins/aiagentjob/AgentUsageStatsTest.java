@@ -111,6 +111,14 @@ class AgentUsageStatsTest {
         assertEquals("", stats.getCostDisplay());
     }
 
+    @Test
+    void antigravity_countsFailedToolCalls() throws IOException {
+        AgentUsageStats stats =
+                parseStats("antigravity-cli-denied-tool.jsonl", AntigravityStatsExtractor.INSTANCE);
+
+        assertEquals(1, stats.getToolCalls());
+    }
+
     // ======================== Codex ========================
 
     @Test

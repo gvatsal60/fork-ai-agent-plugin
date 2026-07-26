@@ -32,7 +32,12 @@ public final class AntigravityStatsExtractor implements AiAgentStatsExtractor {
     }
 
     private static void extractStepUpdate(JSONObject update, AgentUsageStats stats) {
-        if (update == null || !"done".equals(LogFormatUtils.normalize(update.optString("state")))) {
+        if (update == null) {
+            return;
+        }
+        String state = LogFormatUtils.normalize(update.optString("state"));
+        boolean terminal = "done".equals(state) || AntigravityLogFormat.isFailureState(state);
+        if (!terminal) {
             return;
         }
         JSONObject usage = update.optJSONObject("usage");
@@ -40,13 +45,7 @@ public final class AntigravityStatsExtractor implements AiAgentStatsExtractor {
             accumulateUsage(usage, stats);
         }
         if ("tool".equals(LogFormatUtils.normalize(update.optString("step_type")))) {
-            String conversationId = LogFormatUtils.firstNonEmpty(update, "conversation_id");
-            String stepIndex = LogFormatUtils.firstNonEmpty(update, "step_index");
-            String toolCallId =
-                    conversationId.isEmpty() || stepIndex.isEmpty()
-                            ? ""
-                            : conversationId + ':' + stepIndex;
-            stats.recordToolCall(toolCallId);
+            stats.recordToolCall(AntigravityLogFormat.stepId(update));
         }
     }
 

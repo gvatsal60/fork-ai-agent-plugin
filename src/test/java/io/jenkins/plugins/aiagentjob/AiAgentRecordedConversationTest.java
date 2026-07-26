@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
+import hudson.model.Result;
 
 import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
@@ -210,6 +211,26 @@ class AiAgentRecordedConversationTest {
         assertEquals(List.of("system", "tool_call", "tool_result", "assistant"), cats);
         assertEquals(1, action.getUsageStats().getToolCalls());
         assertEquals("gemini-3.6-flash-low", action.getUsageStats().getDetectedModel());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void antigravityDeniedToolFailsZeroExitBuild(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                buildProjectWithFixture(
+                        jenkins,
+                        "antigravity-denied-tool",
+                        new AntigravityAgentHandler(),
+                        "antigravity-cli-denied-tool.jsonl");
+
+        FreeStyleBuild build = project.scheduleBuild2(0).get();
+        jenkins.assertBuildStatus(Result.FAILURE, build);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        assertEquals(Integer.valueOf(1), action.getExitCode());
+        assertTrue(
+                action.getEvents().stream()
+                        .anyMatch(e -> e.getToolOutput().contains("denied by policy")));
     }
 
     @Test

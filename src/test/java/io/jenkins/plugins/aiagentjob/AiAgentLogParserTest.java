@@ -413,6 +413,19 @@ class AiAgentLogParserTest {
         assertEquals("completed output", line.toEventView().getContent());
     }
 
+    @Test
+    void antigravityConversation_showsNestedToolErrors() throws IOException {
+        List<AiAgentLogParser.EventView> events =
+                parseFixture("antigravity-cli-denied-tool.jsonl", AntigravityLogFormat.INSTANCE);
+
+        AiAgentLogParser.EventView toolResult =
+                events.stream()
+                        .filter(e -> "tool_result".equals(e.getCategory()))
+                        .findFirst()
+                        .orElseThrow();
+        assertEquals("Tool execution denied by policy", toolResult.getToolOutput());
+    }
+
     // ======================== OpenCode Tests ========================
 
     @Test
