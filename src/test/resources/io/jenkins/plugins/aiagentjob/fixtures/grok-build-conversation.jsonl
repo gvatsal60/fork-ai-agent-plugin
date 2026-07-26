@@ -1,0 +1,7 @@
+{"type":"thought","data":"Reviewing"}
+{"type":"thought","data":" the repository"}
+{"type":"thought","data":" structure before proposing changes."}
+{"type":"text","data":"Review complete.\n\n"}
+{"type":"text","data":"The build configuration is consistent, "}
+{"type":"text","data":"and the focused checks pass."}
+{"type":"end","stopReason":"EndTurn","sessionId":"00000000-0000-4000-8000-000000000001","requestId":"fixture-request-1","usage":{"input_tokens":6200,"cache_read_input_tokens":18400,"output_tokens":720,"reasoning_tokens":340,"total_tokens":25320},"num_turns":3,"modelUsage":{"grok-4.5-build":{"inputTokens":6200,"outputTokens":720,"cacheReadInputTokens":18400,"modelCalls":3,"costUSD":0.01875}},"total_cost_usd":0.01875,"total_cost_usd_ticks":187500000}

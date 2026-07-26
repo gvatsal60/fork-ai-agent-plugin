@@ -9,6 +9,7 @@ import hudson.model.TaskListener;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -49,7 +50,7 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
         if (!supportsManualApprovals()) {
             throw new IllegalArgumentException(
                     "Manual approvals require an ACP-capable agent. Disable manual approvals or "
-                            + "use OpenCode.");
+                            + "use OpenCode or Grok Build.");
         }
     }
 
@@ -153,11 +154,28 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
         private final List<String> command;
         private final String model;
         private final String reasoningEffort;
+        private final Map<String, String> authenticationMethods;
+        private final List<String> fallbackAuthenticationMethods;
 
         public AcpExecutionSpec(List<String> command, String model, String reasoningEffort) {
+            this(command, model, reasoningEffort, Map.of(), List.of());
+        }
+
+        public AcpExecutionSpec(
+                List<String> command,
+                String model,
+                String reasoningEffort,
+                Map<String, String> authenticationMethods,
+                List<String> fallbackAuthenticationMethods) {
             this.command = command == null ? List.of() : List.copyOf(command);
             this.model = model == null ? "" : model;
             this.reasoningEffort = reasoningEffort == null ? "" : reasoningEffort;
+            this.authenticationMethods =
+                    authenticationMethods == null ? Map.of() : Map.copyOf(authenticationMethods);
+            this.fallbackAuthenticationMethods =
+                    fallbackAuthenticationMethods == null
+                            ? List.of()
+                            : List.copyOf(fallbackAuthenticationMethods);
         }
 
         public List<String> getCommand() {
@@ -170,6 +188,16 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
 
         public String getReasoningEffort() {
             return reasoningEffort;
+        }
+
+        /** Maps required environment variable names to ACP authentication method IDs. */
+        public Map<String, String> getAuthenticationMethods() {
+            return authenticationMethods;
+        }
+
+        /** Authentication methods to try when no method can be selected from the launch env. */
+        public List<String> getFallbackAuthenticationMethods() {
+            return fallbackAuthenticationMethods;
         }
     }
 }

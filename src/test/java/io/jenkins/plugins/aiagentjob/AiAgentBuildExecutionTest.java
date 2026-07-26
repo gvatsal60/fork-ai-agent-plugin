@@ -29,6 +29,7 @@ import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeStatsExtractor;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
@@ -855,6 +856,138 @@ class AiAgentBuildExecutionTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void grokBuildAcp_authenticatesAndWaitsForJenkinsApproval(JenkinsRule jenkins)
+            throws Exception {
+        String apiKey = "xai-fixture-secret-for-grok-acp";
+        StringCredentialsImpl credential =
+                new StringCredentialsImpl(
+                        CredentialsScope.GLOBAL,
+                        "grok-xai-key",
+                        "Grok API key",
+                        Secret.fromString(apiKey));
+        CredentialsProvider.lookupStores(jenkins.getInstance())
+                .iterator()
+                .next()
+                .addCredentials(Domain.global(), credential);
+        File fakeBin = installFakeGrok(jenkins, "fake-grok-bin");
+
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-grok-acp-approval",
+                        b -> {
+                            b.setAgent(new GrokBuildAgentHandler());
+                            b.setPrompt("create approved.txt");
+                            b.setRequireApprovals(true);
+                            b.setApprovalTimeoutSeconds(30);
+                            b.setApiCredentialsId("grok-xai-key");
+                            b.setModel("grok-4.5");
+                            b.setReasoningEffort("high");
+                            b.setExtraArgs(
+                                    "--always-approve --disable-web-search "
+                                            + "--plugin-dir /tmp/grok-plugin");
+                            b.setEnvironmentVariables("PATH=" + path);
+                            b.setSetupScript("true");
+                            b.setFailOnAgentError(true);
+                        });
+
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild runningBuild = future.waitForStart();
+        ExecutionRegistry.PendingApproval pending =
+                waitForPendingApproval(jenkins, runningBuild, future);
+        assertEquals("****", pending.getInputSummary());
+        AiAgentRunAction action = runningBuild.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        ExecutionRegistry.LiveExecution liveExecution =
+                ExecutionRegistry.get(runningBuild, action.getLatestInvocationId());
+        assertNotNull(liveExecution);
+        assertTrue(liveExecution.approve(pending.getId()));
+
+        FreeStyleBuild build = future.get(20, TimeUnit.SECONDS);
+        jenkins.assertBuildStatusSuccess(build);
+        FilePath workspace = build.getWorkspace();
+        assertNotNull(workspace);
+        assertTrue(workspace.child("approved.txt").exists());
+        assertTrue(
+                workspace
+                        .child("approval-response.json")
+                        .readToString()
+                        .contains("\"optionId\":\"allow-once\""));
+
+        String acpCommand = workspace.child("acp-command.txt").readToString();
+        assertTrue(acpCommand.contains("--no-auto-update --permission-mode default"));
+        assertTrue(acpCommand.contains("--disable-web-search agent"));
+        assertTrue(acpCommand.contains("--model grok-4.5"));
+        assertTrue(acpCommand.contains("--reasoning-effort high"));
+        assertTrue(acpCommand.endsWith("--plugin-dir /tmp/grok-plugin stdio\n"));
+        assertFalse(acpCommand.contains("--always-approve"));
+
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+        assertTrue(rawLog.contains("session/request_permission"));
+        assertFalse(rawLog.contains(apiKey));
+        assertFalse(jenkins.getLog(build).contains(apiKey));
+        assertTrue(action.getEvents().stream().anyMatch(e -> "tool_call".equals(e.getCategory())));
+        assertTrue(
+                action.getEvents().stream().anyMatch(e -> "tool_result".equals(e.getCategory())));
+        assertTrue(action.getEvents().stream().anyMatch(e -> "assistant".equals(e.getCategory())));
+        AgentUsageStats stats = action.getUsageStats();
+        assertEquals(300, stats.getInputTokens());
+        assertEquals(900, stats.getCacheReadTokens());
+        assertEquals(1280, stats.getTotalTokens());
+        assertEquals("grok-4.5-build", stats.getDetectedModel());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void grokBuildAcp_detectsApiKeyExportedBySetupScript(JenkinsRule jenkins) throws Exception {
+        String apiKey = "xai-setup-fixture-key";
+        File fakeBin = installFakeGrok(jenkins, "fake-grok-setup-bin");
+        String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
+        FreeStyleProject project =
+                newProject(
+                        jenkins,
+                        "ai-build-grok-setup-auth",
+                        b -> {
+                            b.setAgent(new GrokBuildAgentHandler());
+                            b.setPrompt("create approved.txt");
+                            b.setRequireApprovals(true);
+                            b.setApprovalTimeoutSeconds(30);
+                            b.setEnvironmentVariables(
+                                    "PATH="
+                                            + path
+                                            + "\nGROK_FIXTURE_PERMISSION_INPUT=fixture-command");
+                            b.setSetupScript("export XAI_API_KEY=" + apiKey);
+                            b.setFailOnAgentError(true);
+                        });
+
+        QueueTaskFuture<FreeStyleBuild> future = project.scheduleBuild2(0);
+        assertNotNull(future);
+        FreeStyleBuild runningBuild = future.waitForStart();
+        ExecutionRegistry.PendingApproval pending =
+                waitForPendingApproval(jenkins, runningBuild, future);
+        assertEquals("fixture-command", pending.getInputSummary());
+        AiAgentRunAction action = runningBuild.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+        ExecutionRegistry.LiveExecution liveExecution =
+                ExecutionRegistry.get(runningBuild, action.getLatestInvocationId());
+        assertNotNull(liveExecution);
+        assertTrue(liveExecution.approve(pending.getId()));
+
+        FreeStyleBuild build = future.get(20, TimeUnit.SECONDS);
+        jenkins.assertBuildStatusSuccess(build);
+        FilePath workspace = build.getWorkspace();
+        assertNotNull(workspace);
+        assertTrue(workspace.child("approved.txt").exists());
+        String rawLog = Files.readString(action.getRawLogFile().toPath());
+        assertFalse(rawLog.contains(AcpClientSession.AUTH_ENVIRONMENT_METHOD));
+        assertFalse(rawLog.contains(apiKey));
+        assertFalse(jenkins.getLog(build).contains(apiKey));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void openCodeAcp_processExitCancelsPendingApproval(JenkinsRule jenkins) throws Exception {
         File fakeBin = installFakeOpenCode(jenkins, "fake-opencode-exit-bin");
         String path = fakeBin.getAbsolutePath() + File.pathSeparator + System.getenv("PATH");
@@ -1022,16 +1155,27 @@ class AiAgentBuildExecutionTest {
 
     private static File installFakeOpenCode(JenkinsRule jenkins, String directoryName)
             throws Exception {
+        return installFakeAcp(jenkins, directoryName, "opencode", "fake-opencode-acp.sh");
+    }
+
+    private static File installFakeGrok(JenkinsRule jenkins, String directoryName)
+            throws Exception {
+        return installFakeAcp(jenkins, directoryName, "grok", "fake-grok-acp.sh");
+    }
+
+    private static File installFakeAcp(
+            JenkinsRule jenkins, String directoryName, String executableName, String fixtureName)
+            throws Exception {
         File fakeBin = new File(jenkins.jenkins.getRootDir(), directoryName);
         assertTrue(fakeBin.mkdirs());
-        File fakeOpenCode = new File(fakeBin, "opencode");
+        File executable = new File(fakeBin, executableName);
         try (InputStream fixture =
                 AiAgentBuildExecutionTest.class.getResourceAsStream(
-                        "/io/jenkins/plugins/aiagentjob/fixtures/fake-opencode-acp.sh")) {
+                        "/io/jenkins/plugins/aiagentjob/fixtures/" + fixtureName)) {
             assertNotNull(fixture);
-            Files.copy(fixture, fakeOpenCode.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(fixture, executable.toPath(), StandardCopyOption.REPLACE_EXISTING);
         }
-        assertTrue(fakeOpenCode.setExecutable(true));
+        assertTrue(executable.setExecutable(true));
         return fakeBin;
     }
 

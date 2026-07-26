@@ -1,4 +1,4 @@
 <?jelly escape-by-default='true'?>
 <div>
-  Adds a reusable <strong>Run AI Agent</strong> build step for running Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, and Gemini CLI with interactive conversation logs and OpenCode approval gates.
+  Adds a reusable <strong>Run AI Agent</strong> build step for running Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, Gemini CLI, and Grok Build with interactive conversation logs and ACP approval gates.
 </div>

@@ -5,15 +5,15 @@
 [![Jenkins Plugin](https://img.shields.io/badge/Jenkins-2.528.3+-blue.svg)](https://www.jenkins.io/)
 
 A Jenkins plugin that adds a reusable **Run AI Agent** build step for running autonomous coding
-agents (Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, Gemini CLI) in Jenkins jobs
-and pipelines.
+agents (Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, Gemini CLI, Grok Build)
+in Jenkins jobs and pipelines.
 
 Plugin ID (artifactId): `ai-agent`
 
 ## Features
 
 - **Reusable build step** — add `Run AI Agent` to Freestyle jobs or Pipeline via `aiAgent(...)`.
-- **Multiple agent support** — Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, and Gemini CLI.
+- **Multiple agent support** — Claude Code, Codex CLI, Cursor Agent, OpenCode, Antigravity CLI, Gemini CLI, and Grok Build.
 - **Inline conversation view** — live-streaming conversation on the build page with structured display of assistant messages, tool calls with inputs/outputs, and thinking blocks. Multiple invocations in the same build are shown as separate cards (latest expanded, older collapsible).
 - **Markdown rendering** — assistant and result messages are rendered as formatted HTML.
 - **Approval gates** — optionally pause builds for human review before tool execution.
@@ -31,6 +31,7 @@ Plugin ID (artifactId): `ai-agent`
 | [OpenCode](https://github.com/opencode-ai/opencode) | JSON | Full (tokens + cost) |
 | [Antigravity CLI](https://antigravity.google/docs/cli/overview) | stream-json | Tokens only |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | stream-json | Tokens only |
+| [Grok Build](https://docs.x.ai/build/overview) | streaming-json / ACP | Full (tokens + cost) |
 
 ## Screenshot
 
@@ -60,7 +61,7 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
 2. Add/configure the **Run AI Agent** build step:
    - **Agent Type** — select the coding agent to run.
    - **Prompt** — the task to send to the agent.
-   - **Model** — optional model override. Codex, Claude Code, and OpenCode accept `model:effort` shorthand such as `gpt-5.6-sol:xhigh`; Antigravity CLI accepts `low`, `medium`, or `high`, such as `gemini-3.6-flash:high`.
+   - **Model** — optional model override. Codex, Claude Code, and OpenCode accept `model:effort` shorthand such as `gpt-5.6-sol:xhigh`; Antigravity CLI and Grok Build accept `low`, `medium`, or `high`, such as `gemini-3.6-flash:high` or `grok-4.5:high`.
    - **Reasoning effort** — optional effort override for supported agents (e.g., `high`, `xhigh`); takes precedence over the model suffix.
    - **YOLO mode** — skip confirmation prompts in the agent.
    - **Approvals** — require human approval for tool calls.
@@ -76,7 +77,8 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
 ### Pipeline Syntax
 
 The step symbol is `aiAgent`, and agent handlers are referenced by their symbols such as
-`claudeCode()`, `codex()`, `cursor()`, `openCode()`, `antigravity()`, and `geminiCli()`.
+`claudeCode()`, `codex()`, `cursor()`, `openCode()`, `antigravity()`, `geminiCli()`, and
+`grok()`.
 
 Minimal invocation (uses default Claude Code handler):
 
@@ -125,6 +127,20 @@ aiAgent(
 )
 ```
 
+Grok Build with API-key authentication, model/effort selection, and manual tool-call approvals:
+
+```groovy
+aiAgent(
+  agent: grok(),
+  prompt: 'Review the repository and fix the failing tests',
+  model: 'grok-4.5',
+  reasoningEffort: 'high',
+  apiCredentialsId: 'xai-api-key',
+  requireApprovals: true,
+  approvalTimeoutSeconds: 300
+)
+```
+
 Codex with job-scoped `config.toml`:
 
 ```groovy
@@ -146,6 +162,29 @@ Some agents (Claude Code, Gemini CLI) are installed via `npx` and require Node.j
 To lock a specific Node.js version across builds, use the [NodeJS Plugin](https://plugins.jenkins.io/nodejs/).
 Configure a NodeJS installation in **Manage Jenkins > Tools**, then select it in the job's build environment
 so that `node` and `npx` resolve to the pinned version.
+
+### Grok Build CLI
+
+Install [Grok Build](https://docs.x.ai/build/overview) on each Jenkins node that runs Grok jobs:
+
+```bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+grok models
+```
+
+For CI, store an xAI API key as a Jenkins Secret Text credential and select it in
+**API key credential**. Grok Build receives it as `XAI_API_KEY`. A cached `grok login` session on
+the node is also supported, but API-key credentials are more portable for ephemeral agents. Keys
+exported by the setup script are detected after shell initialization without exposing their value.
+
+Normal jobs use `--permission-mode auto` for guarded automation without unrestricted YOLO mode:
+
+```bash
+grok --no-auto-update -p '<prompt>' --output-format streaming-json --permission-mode auto
+```
+
+Manual approval jobs use `grok agent stdio` over ACP, authenticate with the injected API key or
+cached token, and stream tool inputs and outputs into the build page.
 
 ## Configuration Reference
 
@@ -224,6 +263,7 @@ The **Reasoning effort** field is passed only to agents with verified CLI suppor
 - Claude Code: `--effort <value>`
 - OpenCode: `--variant <value>`
 - Antigravity CLI: `--effort <value>` (`low`, `medium`, or `high`)
+- Grok Build: `--reasoning-effort <value>` (`low`, `medium`, or `high`)
 
 Gemini CLI and Cursor Agent currently ignore the field in the built-in command template.
 
@@ -231,8 +271,8 @@ For supported agents, the **Model** field also accepts `model:effort` shorthand.
 `gpt-5.6-sol:xhigh` resolves to model `gpt-5.6-sol` and reasoning effort `xhigh`. Recognized
 suffixes depend on the selected agent: Codex accepts `low`, `medium`, `high`, `xhigh`, `max`,
 and `ultra`; Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`; OpenCode also
-accepts `minimal`; and Antigravity CLI accepts `low`, `medium`, and `high`. Provider-defined
-support still determines whether a variant is available.
+accepts `minimal`; and Antigravity CLI and Grok Build accept `low`, `medium`, and `high`.
+Provider-defined support still determines whether a variant is available.
 Other suffixes remain part of the model identifier. Use a double colon to keep a recognized
 suffix literal, such as `provider/model::high` for model `provider/model:high`. A value in
 **Reasoning effort** overrides the shorthand suffix.
@@ -253,13 +293,20 @@ Prompt and command-line values are not retained in build action metadata because
 
 ### Approval Gates
 
-Manual approvals are currently supported only for OpenCode. Approval builds use its bidirectional Agent Client Protocol server and pause before tool execution until a user approves or denies from the build page. Denied or timed-out requests fail the build. The installed OpenCode CLI must support `opencode acp`; builds without manual approvals continue to use `opencode run`.
+Manual approvals are supported for OpenCode and Grok Build through their bidirectional Agent
+Client Protocol servers. Jenkins pauses whenever the agent requests tool permission and waits for
+approval or denial from the build page. Denied or timed-out requests fail the build.
+
+OpenCode approval jobs use `opencode acp`. Grok approval jobs use `grok agent stdio`, force the
+interactive permission mode even when the node defaults to always-approve, and remove bypass flags
+from extra arguments. Grok ACP authentication prefers an injected `XAI_API_KEY` and falls back to a
+cached node login.
 
 Claude Code, Codex CLI, Cursor Agent, Antigravity CLI, Gemini CLI, and command overrides do not expose a supported bidirectional approval channel to this plugin. Jobs reject those combinations before launching instead of showing an approval that cannot affect tool execution.
 
 ### Usage Statistics
 
-After a build completes, a statistics bar shows token usage, cost (when available), and duration. Data is extracted from the agent's own reporting in the JSONL log. The level of detail depends on the agent — Claude Code and OpenCode report full cost, while others report only token counts.
+After a build completes, a statistics bar shows token usage, cost (when available), and duration. Data is extracted from the agent's own reporting in the JSONL log. The level of detail depends on the agent — Claude Code, OpenCode, and Grok Build report full cost, while others report only token counts.
 
 ## Building
 
@@ -318,12 +365,14 @@ src/main/java/io/jenkins/plugins/aiagentjob/
 ├── AiAgentExecutionCustomization.java # Agent-specific env vars and cleanup hooks
 ├── AiAgentTempFiles.java           # Temp directory management for build workspaces
 ├── ExecutionRegistry.java          # In-memory registry for live execution state
+├── AcpLogFormat.java               # Shared Agent Client Protocol event parser
 ├── LogFormatUtils.java             # Shared JSON field extraction helpers
 ├── antigravity/                    # Antigravity CLI implementation
 ├── claudecode/                     # Claude Code agent implementation
 ├── codex/                          # Codex CLI implementation (+ optional config.toml)
 ├── cursor/                         # Cursor Agent implementation
 ├── geminicli/                      # Gemini CLI implementation
+├── grokbuild/                      # Grok Build implementation
 └── opencode/                       # OpenCode implementation
 ```
 

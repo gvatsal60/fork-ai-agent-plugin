@@ -9,6 +9,7 @@ import hudson.model.FreeStyleProject;
 
 import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -87,6 +88,29 @@ class AiAgentBuilderConfigRoundTripTest {
 
         AiAgentBuilder reloaded = (AiAgentBuilder) project.getBuildersList().get(0);
         assertEquals("ANTIGRAVITY_CLI", reloaded.getAgent().getId());
+    }
+
+    @Test
+    void preservesGrokBuildHandlerAndSharedControls(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project = jenkins.createFreeStyleProject("grok-config-roundtrip");
+        AiAgentBuilder builder = new AiAgentBuilder();
+        builder.setAgent(new GrokBuildAgentHandler());
+        builder.setPrompt("Review this repository.");
+        builder.setModel("grok-4.5");
+        builder.setReasoningEffort("high");
+        builder.setRequireApprovals(true);
+        builder.setApiCredentialsId("xai-key");
+        project.getBuildersList().add(builder);
+        project.save();
+
+        project = jenkins.configRoundtrip(project);
+
+        AiAgentBuilder reloaded = (AiAgentBuilder) project.getBuildersList().get(0);
+        assertEquals("GROK_BUILD", reloaded.getAgent().getId());
+        assertEquals("grok-4.5", reloaded.getModel());
+        assertEquals("high", reloaded.getReasoningEffort());
+        assertTrue(reloaded.isRequireApprovals());
+        assertEquals("xai-key", reloaded.getApiCredentialsId());
     }
 
     @Test

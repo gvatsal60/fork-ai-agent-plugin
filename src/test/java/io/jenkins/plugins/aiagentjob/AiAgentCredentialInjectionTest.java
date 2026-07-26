@@ -16,6 +16,7 @@ import hudson.util.Secret;
 import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
@@ -258,6 +259,9 @@ class AiAgentCredentialInjectionTest {
 
         project.setAgent(new AntigravityAgentHandler());
         assertEquals("", project.getEffectiveApiKeyEnvVar());
+
+        project.setAgent(new GrokBuildAgentHandler());
+        assertEquals("XAI_API_KEY", project.getEffectiveApiKeyEnvVar());
     }
 
     @Test
