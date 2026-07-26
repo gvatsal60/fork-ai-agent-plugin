@@ -9,7 +9,9 @@ import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.text.NumberFormat;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Normalized token usage and cost statistics extracted from AI agent JSONL logs. Aggregates values
@@ -36,6 +38,7 @@ public final class AgentUsageStats implements Serializable {
     private int numTurns;
     private int toolCalls;
     private String detectedModel = "";
+    private transient Set<String> countedToolCallIds;
 
     public long getInputTokens() {
         return inputTokens;
@@ -239,6 +242,21 @@ public final class AgentUsageStats implements Serializable {
     /** Set tool call count (takes the max of current and new value). */
     public void addToolCalls(int value) {
         toolCalls = Math.max(toolCalls, value);
+    }
+
+    /** Record a tool call, deduplicating stable call IDs when available. */
+    public void recordToolCall(String callId) {
+        if (callId != null && !callId.isEmpty()) {
+            if (countedToolCallIds == null) {
+                countedToolCallIds = new HashSet<>();
+            }
+            if (!countedToolCallIds.add(callId)) {
+                return;
+            }
+        }
+        if (toolCalls < Integer.MAX_VALUE) {
+            toolCalls++;
+        }
     }
 
     /** Set the detected model name if not already set. */

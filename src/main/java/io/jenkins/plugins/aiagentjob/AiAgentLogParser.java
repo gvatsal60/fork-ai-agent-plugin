@@ -28,6 +28,7 @@ import java.util.Map;
  * <p>Built-in formats:
  *
  * <ul>
+ *   <li>Antigravity CLI log format — Antigravity stream-json
  *   <li>Claude Code log format — Claude Code / Gemini CLI stream-json
  *   <li>Codex log format — Codex CLI JSONL
  *   <li>Cursor log format — Cursor Agent stream-json

@@ -270,6 +270,7 @@ final class AiAgentExecutor {
                         }
                     }
                 }
+                exitCode = agent.resolveExitCode(exitCode, action.getRawLogFile(invocationId));
                 if (exitCode == 127) {
                     printCommandNotFoundGuidance(listener);
                 }

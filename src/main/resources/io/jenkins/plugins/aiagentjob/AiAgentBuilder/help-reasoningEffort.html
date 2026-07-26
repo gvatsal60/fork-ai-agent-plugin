@@ -1,10 +1,12 @@
 <div>
   Optional reasoning effort for agents that support it. Codex maps this to
   <code>model_reasoning_effort</code>, Claude Code maps it to <code>--effort</code>,
-  and OpenCode maps it to <code>--variant</code>. Common values include
+  OpenCode maps it to <code>--variant</code>, and Antigravity CLI maps it to
+  <code>--effort</code>. Common values include
   <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, and
-  <code>max</code>. Codex also supports <code>ultra</code> on compatible models, and
-  OpenCode supports <code>minimal</code>. You can instead append a recognized value to
+  <code>max</code>. Codex also supports <code>ultra</code> on compatible models, OpenCode
+  supports <code>minimal</code>, and Antigravity CLI currently accepts <code>low</code>,
+  <code>medium</code>, and <code>high</code>. You can instead append a recognized value to
   the model, such as <code>gpt-5.6-sol:xhigh</code>. This field takes precedence over
   that shorthand. Unsupported agents ignore this field.
 </div>

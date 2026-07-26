@@ -13,6 +13,7 @@ import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.util.Secret;
 
+import io.jenkins.plugins.aiagentjob.antigravity.AntigravityAgentHandler;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
@@ -254,6 +255,9 @@ class AiAgentCredentialInjectionTest {
 
         project.setAgent(new GeminiCliAgentHandler());
         assertEquals("GEMINI_API_KEY", project.getEffectiveApiKeyEnvVar());
+
+        project.setAgent(new AntigravityAgentHandler());
+        assertEquals("", project.getEffectiveApiKeyEnvVar());
     }
 
     @Test

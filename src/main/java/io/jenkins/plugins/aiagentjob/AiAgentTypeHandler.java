@@ -6,6 +6,7 @@ import hudson.Util;
 import hudson.model.AbstractDescribableImpl;
 import hudson.model.TaskListener;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +32,7 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
     /** Stable identifier for this agent implementation. */
     public abstract String getId();
 
+    /** Default API-key environment variable, or empty when the agent uses node-level auth. */
     public abstract String getDefaultApiKeyEnvVar();
 
     /** Rejects unsupported execution settings before any process or temporary file is created. */
@@ -100,6 +102,14 @@ public abstract class AiAgentTypeHandler extends AbstractDescribableImpl<AiAgent
             AiAgentConfiguration config, FilePath workspace, TaskListener listener)
             throws IOException, InterruptedException {
         return AiAgentExecutionCustomization.empty();
+    }
+
+    /**
+     * Maps process exit status after complete output has been persisted. Agents that report
+     * terminal failures while exiting zero can override this method.
+     */
+    public int resolveExitCode(int processExitCode, File rawLogFile) throws IOException {
+        return processExitCode;
     }
 
     /**
