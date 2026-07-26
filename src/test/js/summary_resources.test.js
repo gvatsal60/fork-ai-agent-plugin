@@ -121,3 +121,19 @@ test('thinking delta appends text only to latest thinking event', function () {
     content: ' ignored'
   }), false);
 });
+
+test('completed tool event renders both input and output when expanded', function () {
+  const container = document.createElement('div');
+  container.insertAdjacentHTML('beforeend', renderEvent({
+    category: 'tool_result',
+    label: 'bash',
+    toolInput: 'check-project --mode focused',
+    toolOutput: '8 checks passed'
+  }));
+
+  const sections = container.querySelectorAll('.ai-tool-section-content');
+  assert.equal(sections.length, 2);
+  assert.equal(sections[0].textContent, 'check-project --mode focused');
+  assert.equal(sections[1].textContent, '8 checks passed');
+  assert.match(container.querySelector('summary').textContent, /check-project --mode focused/);
+});

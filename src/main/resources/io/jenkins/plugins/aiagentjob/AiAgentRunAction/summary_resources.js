@@ -226,11 +226,17 @@
       html += '<summary class="ai-tool-header ai-details-summary">';
       html += '<span class="ai-badge ai-badge-tool_result">OUTPUT</span>';
       html += '<span class="ai-tool-label">' + esc(ev.label) + '</span>';
-      if (ev.toolOutput) {
+      if (ev.toolInput) {
+        html += '<span class="ai-tool-input-preview">' + excerpt(ev.toolInput, 120) + '</span>';
+      } else if (ev.toolOutput) {
         html += '<span class="ai-tool-input-preview ai-tool-output-preview">' + excerpt(ev.toolOutput, 80) + '</span>';
       }
       html += '</summary>';
       html += '<div class="ai-tool-body">';
+      if (ev.toolInput) {
+        html += '<div class="ai-tool-section-label">Input</div>';
+        html += '<div class="ai-tool-section-content">' + esc(ev.toolInput) + '</div>';
+      }
       if (ev.toolOutput) {
         html += '<div class="ai-tool-section-label">Output</div>';
         html += '<div class="ai-tool-section-content">' + esc(ev.toolOutput) + '</div>';

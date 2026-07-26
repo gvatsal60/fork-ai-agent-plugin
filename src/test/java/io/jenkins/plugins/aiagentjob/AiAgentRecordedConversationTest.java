@@ -113,7 +113,20 @@ class AiAgentRecordedConversationTest {
         assertTrue(cats.contains("tool_call"), "Should have tool_call");
         assertTrue(cats.contains("tool_result"), "Should have tool_result");
         assertTrue(cats.contains("assistant"), "Should have assistant");
-        assertEquals(11, events.size(), "Current Codex fixture should render 11 visible events");
+        assertEquals(17, events.size(), "Current Codex fixture should render 17 visible events");
+        List<AiAgentLogParser.EventView> completedCommands =
+                events.stream()
+                        .filter(e -> "tool_result".equals(e.getCategory()))
+                        .filter(e -> "bash".equals(e.getLabel()))
+                        .collect(Collectors.toList());
+        assertEquals(5, completedCommands.size());
+        assertTrue(
+                completedCommands.stream().allMatch(e -> !e.getToolInput().isEmpty()),
+                "Completed Codex commands should expose input");
+        assertEquals(
+                1,
+                completedCommands.stream().filter(e -> e.getToolOutput().isEmpty()).count(),
+                "Silent command completion should remain visible without output");
     }
 
     @Test
