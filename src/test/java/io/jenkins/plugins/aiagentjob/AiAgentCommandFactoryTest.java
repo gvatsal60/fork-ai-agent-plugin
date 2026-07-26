@@ -10,6 +10,7 @@ import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,7 @@ class AiAgentCommandFactoryTest {
         handlers.add(new OpenCodeAgentHandler());
         handlers.add(new GeminiCliAgentHandler());
         handlers.add(new AntigravityAgentHandler());
+        handlers.add(new GrokBuildAgentHandler());
         return handlers;
     }
 
@@ -462,6 +464,107 @@ class AiAgentCommandFactoryTest {
                         () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
 
         assertTrue(error.getMessage().contains("command override"));
+    }
+
+    // ======================== Grok Build Command Tests ========================
+
+    @Test
+    void grokBuild_basicCommand() {
+        AiAgentBuilder project = createProject(new GrokBuildAgentHandler());
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "review this");
+
+        assertEquals(
+                List.of(
+                        "grok",
+                        "--no-auto-update",
+                        "-p",
+                        "review this",
+                        "--output-format",
+                        "streaming-json",
+                        "--permission-mode",
+                        "auto"),
+                cmd);
+    }
+
+    @Test
+    void grokBuild_mapsYoloModelAndReasoningEffort() {
+        AiAgentBuilder project = createProject(new GrokBuildAgentHandler());
+        project.setYoloMode(true);
+        project.setModel("grok-4.5");
+        project.setReasoningEffort("high");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+
+        assertTrue(cmd.contains("--always-approve"));
+        assertFalse(cmd.contains("auto"));
+        assertEquals("grok-4.5", cmd.get(cmd.indexOf("--model") + 1));
+        assertEquals("high", cmd.get(cmd.indexOf("--reasoning-effort") + 1));
+    }
+
+    @Test
+    void grokBuild_modelSuffixSetsReasoningEffortForHeadlessAndAcp() {
+        GrokBuildAgentHandler handler = new GrokBuildAgentHandler();
+        AiAgentBuilder project = createProject(handler);
+        project.setModel("grok-4.5:medium");
+
+        List<String> command = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+        AiAgentTypeHandler.AcpExecutionSpec execution = handler.buildAcpExecution(project);
+        List<String> acpCommand = execution.getCommand();
+
+        assertEquals("grok-4.5", command.get(command.indexOf("--model") + 1));
+        assertEquals("medium", command.get(command.indexOf("--reasoning-effort") + 1));
+        assertEquals("grok-4.5", acpCommand.get(acpCommand.indexOf("--model") + 1));
+        assertEquals("medium", acpCommand.get(acpCommand.indexOf("--reasoning-effort") + 1));
+    }
+
+    @Test
+    void grokBuild_acpUsesAuthenticationAndForcesInteractivePermissions() {
+        GrokBuildAgentHandler handler = new GrokBuildAgentHandler();
+        AiAgentBuilder project = createProject(handler);
+        project.setModel("grok-4.5");
+        project.setReasoningEffort("high");
+        project.setApiEnvVarName("GROK_API_TOKEN");
+        project.setSetupScript("export XAI_API_KEY=\"$GROK_API_TOKEN\"");
+        project.setExtraArgs(
+                "--model grok-override --effort=medium --output-format json "
+                        + "--always-approve --permission-mode bypassPermissions "
+                        + "--dangerously-skip-permissions=true --allow Bash "
+                        + "--allowedTools=Edit --disable-web-search --tools execute "
+                        + "--disallowed-tools web_search --max-turns 4 "
+                        + "--plugin-dir /opt/grok-plugin --no-leader");
+
+        AiAgentTypeHandler.AcpExecutionSpec execution = handler.buildAcpExecution(project);
+
+        assertEquals(
+                List.of(
+                        "grok",
+                        "--no-auto-update",
+                        "--permission-mode",
+                        "default",
+                        "--disable-web-search",
+                        "--tools",
+                        "execute",
+                        "--disallowed-tools",
+                        "web_search",
+                        "--max-turns",
+                        "4",
+                        "agent",
+                        "--model",
+                        "grok-override",
+                        "--reasoning-effort",
+                        "medium",
+                        "--plugin-dir",
+                        "/opt/grok-plugin",
+                        "--no-leader",
+                        "stdio"),
+                execution.getCommand());
+        assertEquals("", execution.getModel());
+        assertEquals("", execution.getReasoningEffort());
+        assertEquals("xai.api_key", execution.getAuthenticationMethods().get("GROK_API_TOKEN"));
+        assertEquals(
+                List.of("xai.api_key", "cached_token"),
+                execution.getFallbackAuthenticationMethods());
     }
 
     // ======================== Gemini CLI Command Tests ========================

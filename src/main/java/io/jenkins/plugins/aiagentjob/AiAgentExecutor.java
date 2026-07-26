@@ -42,6 +42,8 @@ import java.util.regex.Pattern;
  * file, and handles the approval-gate flow when approvals are enabled.
  */
 final class AiAgentExecutor {
+    private static final Duration ACP_PROTOCOL_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
     private AiAgentExecutor() {}
 
     static int execute(
@@ -157,15 +159,21 @@ final class AiAgentExecutor {
             boolean disableInteractive =
                     resolvedConfig.isDisableInteractive() && acpExecution == null;
             List<String> command;
+            boolean waitForAcpProcessReady = false;
             if ((!setupScript.isEmpty() && launcher.isUnix()) || needsShellEnvironmentBootstrap) {
                 String combinedScript =
                         buildCombinedScript(
                                 setupScript,
                                 executionCustomization.getEnvironment(),
                                 agentCommand,
-                                commandOverride);
+                                commandOverride,
+                                acpExecution == null
+                                        ? List.of()
+                                        : acpExecution.getAuthenticationMethods().keySet(),
+                                acpExecution != null);
                 tempSetupScript = writeTempScript(workspace, combinedScript);
                 command = buildShellCommand(combinedScript, tempSetupScript);
+                waitForAcpProcessReady = acpExecution != null;
             } else if (!commandOverride.isEmpty()) {
                 if (launcher.isUnix()) {
                     // Use a non-login shell so injected HOME/USERPROFILE are not overridden.
@@ -229,7 +237,8 @@ final class AiAgentExecutor {
                                         liveExecution,
                                         approvalTimeout,
                                         prompt,
-                                        acpExecution);
+                                        acpExecution,
+                                        waitForAcpProcessReady);
                     } else {
                         Launcher.ProcStarter procStarter =
                                 launcher.launch()
@@ -316,7 +325,8 @@ final class AiAgentExecutor {
             ExecutionRegistry.LiveExecution liveExecution,
             Duration approvalTimeout,
             String prompt,
-            AiAgentTypeHandler.AcpExecutionSpec acpExecution)
+            AiAgentTypeHandler.AcpExecutionSpec acpExecution,
+            boolean waitForProcessReady)
             throws IOException, InterruptedException {
         Proc proc =
                 startProcess(
@@ -350,12 +360,22 @@ final class AiAgentExecutor {
         try {
             AcpClientSession session =
                     new AcpClientSession(
-                            proc, stdout, stdin, outputHandler, liveExecution, approvalTimeout);
+                            proc,
+                            stdout,
+                            stdin,
+                            outputHandler,
+                            liveExecution,
+                            approvalTimeout,
+                            ACP_PROTOCOL_REQUEST_TIMEOUT,
+                            waitForProcessReady);
             return session.execute(
                             runDirectory.getRemote(),
                             prompt,
                             acpExecution.getModel(),
-                            acpExecution.getReasoningEffort())
+                            acpExecution.getReasoningEffort(),
+                            acpExecution.getAuthenticationMethods(),
+                            acpExecution.getFallbackAuthenticationMethods(),
+                            procEnv)
                     ? 0
                     : 1;
         } finally {
@@ -423,11 +443,20 @@ final class AiAgentExecutor {
             String setupScript,
             Map<String, String> shellEnvironment,
             List<String> agentCommand,
-            String commandOverride) {
+            String commandOverride,
+            Iterable<String> acpAuthenticationEnvironmentVariables,
+            boolean acpMode) {
         StringBuilder sb = new StringBuilder();
         appendShebangAwarePreamble(sb, setupScript, shellEnvironment);
         sb.append("set +x\n");
+        if (acpMode) {
+            sb.append("printf '\\n'\n");
+        }
+        appendAcpAuthenticationMarkers(sb, acpAuthenticationEnvironmentVariables);
         if (!commandOverride.isEmpty()) {
+            if (acpMode) {
+                appendAcpProcessReadyMarker(sb);
+            }
             String cmd = commandOverride;
             sb.append(cmd);
             if (!cmd.endsWith("\n")) {
@@ -435,6 +464,9 @@ final class AiAgentExecutor {
             }
         } else {
             appendExecutableCheck(sb, agentCommand.get(0));
+            if (acpMode) {
+                appendAcpProcessReadyMarker(sb);
+            }
             sb.append("exec");
             for (String token : agentCommand) {
                 sb.append(' ').append(shellQuote(token));
@@ -456,6 +488,32 @@ final class AiAgentExecutor {
                                         + "' was not found. Configure Executable path or update "
                                         + "PATH in Setup script."))
                 .append("\n  exit 127\nfi\n");
+    }
+
+    private static void appendAcpAuthenticationMarkers(
+            StringBuilder sb, Iterable<String> environmentVariables) {
+        for (String name : environmentVariables) {
+            if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+                continue;
+            }
+            String marker =
+                    "{\"jsonrpc\":\"2.0\",\"method\":\""
+                            + AcpClientSession.AUTH_ENVIRONMENT_METHOD
+                            + "\",\"params\":{\"name\":\""
+                            + name
+                            + "\"}}";
+            sb.append("if [ -n \"${").append(name).append(":-}\" ]; then\n");
+            sb.append("  printf '%s\\n' ").append(shellQuote(marker)).append('\n');
+            sb.append("fi\n");
+        }
+    }
+
+    private static void appendAcpProcessReadyMarker(StringBuilder sb) {
+        String marker =
+                "{\"jsonrpc\":\"2.0\",\"method\":\""
+                        + AcpClientSession.PROCESS_READY_METHOD
+                        + "\"}";
+        sb.append("printf '%s\\n' ").append(shellQuote(marker)).append('\n');
     }
 
     private static void appendShebangAwarePreamble(

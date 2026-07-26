@@ -33,6 +33,7 @@ import java.util.Map;
  *   <li>Codex log format — Codex CLI JSONL
  *   <li>Cursor log format — Cursor Agent stream-json
  *   <li>OpenCode log format — OpenCode JSONL
+ *   <li>Grok Build log format — streaming JSON and ACP
  * </ul>
  *
  * Shared helpers live in {@link LogFormatUtils}.

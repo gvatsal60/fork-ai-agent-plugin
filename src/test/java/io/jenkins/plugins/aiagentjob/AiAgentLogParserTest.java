@@ -10,6 +10,7 @@ import io.jenkins.plugins.aiagentjob.antigravity.AntigravityLogFormat;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeLogFormat;
 import io.jenkins.plugins.aiagentjob.codex.CodexLogFormat;
 import io.jenkins.plugins.aiagentjob.cursor.CursorLogFormat;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildLogFormat;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeLogFormat;
 
 import org.junit.jupiter.api.Test;
@@ -489,6 +490,76 @@ class AiAgentLogParserTest {
         assertEquals("thinking", events.get(0).getCategory());
         assertEquals("Inspect-tests", events.get(0).getContent());
         assertFalse(events.get(0).isDelta(), "Merged stream event should no longer be a delta");
+    }
+
+    // ======================== Grok Build Tests ========================
+
+    @Test
+    void grokBuildHeadless_mergesStreamingChunksWithoutLosingWhitespace() throws IOException {
+        List<AiAgentLogParser.EventView> events =
+                parseFixture("grok-build-conversation.jsonl", GrokBuildLogFormat.INSTANCE);
+
+        assertEquals(3, events.size());
+        assertEquals("thinking", events.get(0).getCategory());
+        assertEquals(
+                "Reviewing the repository structure before proposing changes.",
+                events.get(0).getContent());
+        assertEquals("assistant", events.get(1).getCategory());
+        assertEquals(
+                "Review complete.\n\nThe build configuration is consistent, and the focused checks pass.",
+                events.get(1).getContent());
+        assertEquals("result", events.get(2).getCategory());
+        assertEquals("EndTurn", events.get(2).getContent());
+    }
+
+    @Test
+    void grokBuildAcp_rendersApprovalToolInputOutputAndAssistantChunks() throws IOException {
+        List<AiAgentLogParser.EventView> events =
+                parseFixture("grok-build-acp-conversation.jsonl", GrokBuildLogFormat.INSTANCE);
+
+        assertEquals(
+                6,
+                events.size(),
+                events.stream()
+                        .map(event -> event.getCategory() + ":" + event.getContent())
+                        .collect(Collectors.joining(" | ")));
+        assertEquals(
+                List.of("user", "thinking", "tool_call", "tool_result", "assistant", "result"),
+                categories(events));
+        assertEquals("I will write the requested file.", events.get(1).getContent());
+        assertEquals("printf 'fixture-ok\\n' > report.txt", events.get(2).getToolInput());
+        assertEquals("Created report.txt\n", events.get(3).getToolOutput());
+        assertEquals("Created report.txt.", events.get(4).getContent());
+        assertEquals("End_turn", events.get(5).getContent());
+    }
+
+    @Test
+    void grokBuildHeadless_hidesCompactionStatusAndReportsMaxTurns() {
+        AiAgentLogParser.EventView compacting =
+                AiAgentLogParser.parseLine(
+                                1,
+                                "{\"type\":\"auto_compact_started\",\"data\":\"Compacting\"}",
+                                GrokBuildLogFormat.INSTANCE)
+                        .toEventView();
+        AiAgentLogParser.EventView continued =
+                AiAgentLogParser.parseLine(
+                                2,
+                                "{\"type\":\"auto_continue_completed\",\"data\":\"Continuing\"}",
+                                GrokBuildLogFormat.INSTANCE)
+                        .toEventView();
+        AiAgentLogParser.EventView maxTurns =
+                AiAgentLogParser.parseLine(
+                                3,
+                                "{\"type\":\"max_turns_reached\",\"num_turns\":5}",
+                                GrokBuildLogFormat.INSTANCE)
+                        .toEventView();
+
+        assertEquals("raw", compacting.getCategory());
+        assertEquals("", compacting.getContent());
+        assertEquals("raw", continued.getCategory());
+        assertEquals("", continued.getContent());
+        assertEquals("result", maxTurns.getCategory());
+        assertEquals("Max turns reached", maxTurns.getContent());
     }
 
     // ======================== Error Handling Tests ========================

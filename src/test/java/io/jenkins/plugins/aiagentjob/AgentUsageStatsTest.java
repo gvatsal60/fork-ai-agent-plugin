@@ -8,6 +8,7 @@ import io.jenkins.plugins.aiagentjob.antigravity.AntigravityStatsExtractor;
 import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeStatsExtractor;
 import io.jenkins.plugins.aiagentjob.codex.CodexStatsExtractor;
 import io.jenkins.plugins.aiagentjob.cursor.CursorStatsExtractor;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildStatsExtractor;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeStatsExtractor;
 
 import net.sf.json.JSONObject;
@@ -218,6 +219,41 @@ class AgentUsageStatsTest {
         assertEquals(55, stats.getInputTokens());
         assertEquals(55, stats.getTotalTokens());
         assertEquals(0.02, stats.getCostUsd(), 0.0001);
+    }
+
+    // ======================== Grok Build ========================
+
+    @Test
+    void grokBuild_extractsHeadlessUsageCostTurnsAndModel() throws IOException {
+        AgentUsageStats stats =
+                parseStats("grok-build-conversation.jsonl", GrokBuildStatsExtractor.INSTANCE);
+
+        assertTrue(stats.hasData());
+        assertEquals(6200, stats.getInputTokens());
+        assertEquals(18400, stats.getCacheReadTokens());
+        assertEquals(720, stats.getOutputTokens());
+        assertEquals(340, stats.getReasoningTokens());
+        assertEquals(25320, stats.getTotalTokens());
+        assertEquals(3, stats.getNumTurns());
+        assertEquals(0.01875, stats.getCostUsd(), 0.000001);
+        assertEquals("grok-4.5-build", stats.getDetectedModel());
+    }
+
+    @Test
+    void grokBuild_extractsAcpAggregateUsageWithoutDoubleCountingCache() throws IOException {
+        AgentUsageStats stats =
+                parseStats("grok-build-acp-conversation.jsonl", GrokBuildStatsExtractor.INSTANCE);
+
+        assertTrue(stats.hasData());
+        assertEquals(3000, stats.getInputTokens());
+        assertEquals(9000, stats.getCacheReadTokens());
+        assertEquals(400, stats.getOutputTokens());
+        assertEquals(120, stats.getReasoningTokens());
+        assertEquals(12400, stats.getTotalTokens());
+        assertEquals(2400, stats.getApiDurationMs());
+        assertEquals(2, stats.getNumTurns());
+        assertEquals(0.0095, stats.getCostUsd(), 0.000001);
+        assertEquals("grok-4.5-build", stats.getDetectedModel());
     }
 
     // ======================== Cursor ========================

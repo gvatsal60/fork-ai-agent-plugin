@@ -14,10 +14,20 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /** Minimal synchronous Agent Client Protocol client for one agent prompt. */
 final class AcpClientSession {
     private static final String JSONRPC_VERSION = "2.0";
+    static final String AUTH_ENVIRONMENT_METHOD = "ai-agent/auth_environment";
+    static final String PROCESS_READY_METHOD = "ai-agent/process_ready";
 
     private final Proc proc;
     private final BufferedReader reader;
@@ -25,6 +35,11 @@ final class AcpClientSession {
     private final AiAgentExecutor.AgentOutputHandler outputHandler;
     private final ExecutionRegistry.LiveExecution liveExecution;
     private final Duration approvalTimeout;
+    private final Duration protocolRequestTimeout;
+    private final boolean waitForProcessReady;
+    private final BlockingQueue<ReadResult> incoming = new ArrayBlockingQueue<>(256);
+    private final Set<String> processEnvironmentVariables = new HashSet<>();
+    private final Thread readerThread;
     private long nextRequestId;
 
     AcpClientSession(
@@ -33,19 +48,58 @@ final class AcpClientSession {
             OutputStream stdin,
             AiAgentExecutor.AgentOutputHandler outputHandler,
             ExecutionRegistry.LiveExecution liveExecution,
-            Duration approvalTimeout) {
+            Duration approvalTimeout,
+            Duration protocolRequestTimeout) {
+        this(
+                proc,
+                stdout,
+                stdin,
+                outputHandler,
+                liveExecution,
+                approvalTimeout,
+                protocolRequestTimeout,
+                false);
+    }
+
+    AcpClientSession(
+            Proc proc,
+            InputStream stdout,
+            OutputStream stdin,
+            AiAgentExecutor.AgentOutputHandler outputHandler,
+            ExecutionRegistry.LiveExecution liveExecution,
+            Duration approvalTimeout,
+            Duration protocolRequestTimeout,
+            boolean waitForProcessReady) {
         this.proc = proc;
         this.reader = new BufferedReader(new InputStreamReader(stdout, StandardCharsets.UTF_8));
         this.writer = new BufferedWriter(new OutputStreamWriter(stdin, StandardCharsets.UTF_8));
         this.outputHandler = outputHandler;
         this.liveExecution = liveExecution;
         this.approvalTimeout = approvalTimeout;
+        this.protocolRequestTimeout = protocolRequestTimeout;
+        this.waitForProcessReady = waitForProcessReady;
+        this.readerThread = startReaderThread();
     }
 
-    boolean execute(String cwd, String prompt, String model, String reasoningEffort)
+    boolean execute(
+            String cwd,
+            String prompt,
+            String model,
+            String reasoningEffort,
+            Map<String, String> authenticationMethods,
+            List<String> fallbackAuthenticationMethods,
+            Map<String, String> environment)
             throws IOException, InterruptedException {
         try {
-            initialize();
+            if (waitForProcessReady) {
+                awaitProcessReady();
+            }
+            JSONObject initialization = initialize();
+            authenticate(
+                    initialization,
+                    authenticationMethods,
+                    fallbackAuthenticationMethods,
+                    environment);
             String sessionId = newSession(cwd);
             setConfigOption(sessionId, "model", model);
             setConfigOption(sessionId, "effort", reasoningEffort);
@@ -53,14 +107,76 @@ final class AcpClientSession {
             return true;
         } catch (ApprovalDeniedException e) {
             return false;
+        } finally {
+            readerThread.interrupt();
         }
     }
 
-    private void initialize() throws IOException, InterruptedException {
+    private JSONObject initialize() throws IOException, InterruptedException {
         JSONObject fileSystem = object("readTextFile", false, "writeTextFile", false);
         JSONObject capabilities = object("fs", fileSystem, "terminal", false);
         JSONObject params = object("protocolVersion", 1, "clientCapabilities", capabilities);
-        request("initialize", params);
+        return request("initialize", params);
+    }
+
+    private void authenticate(
+            JSONObject initialization,
+            Map<String, String> authenticationMethods,
+            List<String> fallbackAuthenticationMethods,
+            Map<String, String> environment)
+            throws IOException, InterruptedException {
+        if (authenticationMethods.isEmpty() && fallbackAuthenticationMethods.isEmpty()) {
+            return;
+        }
+
+        Set<String> advertisedMethods = advertisedAuthenticationMethods(initialization);
+        Set<String> candidates = new LinkedHashSet<>();
+        for (Map.Entry<String, String> entry : authenticationMethods.entrySet()) {
+            String value = environment.get(entry.getKey());
+            if (((value != null && !value.trim().isEmpty())
+                            || processEnvironmentVariables.contains(entry.getKey()))
+                    && advertisedMethods.contains(entry.getValue())) {
+                candidates.add(entry.getValue());
+            }
+        }
+        for (String method : fallbackAuthenticationMethods) {
+            if (advertisedMethods.contains(method)) {
+                candidates.add(method);
+            }
+        }
+        if (candidates.isEmpty()) {
+            throw new IOException(
+                    "ACP agent did not advertise an authentication method usable with the "
+                            + "configured environment.");
+        }
+
+        String selectedMethod = candidates.iterator().next();
+        request(
+                "authenticate",
+                object("methodId", selectedMethod, "_meta", object("headless", true)));
+    }
+
+    private static Set<String> advertisedAuthenticationMethods(JSONObject initialization) {
+        Set<String> methods = new HashSet<>();
+        JSONArray advertised = initialization.optJSONArray("authMethods");
+        if (advertised == null) {
+            return methods;
+        }
+        for (int i = 0; i < advertised.size(); i++) {
+            Object item = advertised.get(i);
+            if (item instanceof JSONObject) {
+                String id = ((JSONObject) item).optString("id", "").trim();
+                if (!id.isEmpty()) {
+                    methods.add(id);
+                }
+            } else if (item != null) {
+                String id = String.valueOf(item).trim();
+                if (!id.isEmpty()) {
+                    methods.add(id);
+                }
+            }
+        }
+        return methods;
     }
 
     private String newSession(String cwd) throws IOException, InterruptedException {
@@ -92,6 +208,8 @@ final class AcpClientSession {
     private JSONObject request(String method, JSONObject params)
             throws IOException, InterruptedException {
         long requestId = ++nextRequestId;
+        boolean boundedRequest = !"session/prompt".equals(method);
+        long requestStartedNanos = System.nanoTime();
         send(
                 object(
                         "jsonrpc",
@@ -104,8 +222,12 @@ final class AcpClientSession {
                         params));
 
         while (true) {
-            JSONObject message = readMessage();
+            JSONObject message = readMessage(method, requestStartedNanos, boundedRequest);
             String incomingMethod = message.optString("method", "");
+            if (captureAuthenticationEnvironment(message)
+                    || PROCESS_READY_METHOD.equals(incomingMethod)) {
+                continue;
+            }
             if ("session/request_permission".equals(incomingMethod) && message.has("id")) {
                 handlePermissionRequest(message);
                 continue;
@@ -135,13 +257,70 @@ final class AcpClientSession {
         }
     }
 
-    private JSONObject readMessage() throws IOException, InterruptedException {
+    private void awaitProcessReady() throws IOException, InterruptedException {
         while (true) {
-            String line = reader.readLine();
+            ReadResult readResult = incoming.take();
+            if (readResult.failure != null) {
+                throw readResult.failure;
+            }
+            String line = readResult.line;
             if (line == null) {
-                int exitCode = proc.join();
-                throw new IOException(
-                        "ACP agent exited with code " + exitCode + " before completing request.");
+                throw new IOException("ACP agent closed stdout before setup completed.");
+            }
+            String trimmed = line.trim();
+            if (!trimmed.startsWith("{")) {
+                outputHandler.recordLine(line);
+                continue;
+            }
+            try {
+                JSONObject message = JSONObject.fromObject(trimmed);
+                if (captureAuthenticationEnvironment(message)) {
+                    continue;
+                }
+                if (PROCESS_READY_METHOD.equals(message.optString("method", ""))) {
+                    return;
+                }
+            } catch (RuntimeException ignored) {
+            }
+            outputHandler.recordLine(line);
+        }
+    }
+
+    private boolean captureAuthenticationEnvironment(JSONObject message) {
+        if (!AUTH_ENVIRONMENT_METHOD.equals(message.optString("method", ""))) {
+            return false;
+        }
+        JSONObject marker = message.optJSONObject("params");
+        String name = marker == null ? "" : marker.optString("name", "").trim();
+        if (!name.isEmpty()) {
+            processEnvironmentVariables.add(name);
+        }
+        return true;
+    }
+
+    private JSONObject readMessage(String method, long requestStartedNanos, boolean boundedRequest)
+            throws IOException, InterruptedException {
+        while (true) {
+            ReadResult readResult;
+            if (boundedRequest) {
+                long elapsedNanos = System.nanoTime() - requestStartedNanos;
+                long remainingNanos = protocolRequestTimeout.toNanos() - elapsedNanos;
+                if (remainingNanos <= 0) {
+                    throw protocolTimeout(method);
+                }
+                readResult = incoming.poll(remainingNanos, TimeUnit.NANOSECONDS);
+                if (readResult == null) {
+                    throw protocolTimeout(method);
+                }
+            } else {
+                readResult = incoming.take();
+            }
+            if (readResult.failure != null) {
+                throw readResult.failure;
+            }
+            String line = readResult.line;
+            if (line == null) {
+                throw new IOException("ACP agent closed stdout before completing request.");
             }
             String trimmed = line.trim();
             if (!trimmed.startsWith("{")) {
@@ -159,6 +338,48 @@ final class AcpClientSession {
                 throw new IOException("ACP agent returned invalid JSON: " + trimmed, e);
             }
         }
+    }
+
+    private IOException protocolTimeout(String method) throws InterruptedException {
+        IOException timeout =
+                new IOException(
+                        "ACP "
+                                + method
+                                + " timed out after "
+                                + protocolRequestTimeout.toSeconds()
+                                + "s.");
+        try {
+            proc.kill();
+        } catch (IOException e) {
+            timeout.addSuppressed(e);
+        }
+        return timeout;
+    }
+
+    private Thread startReaderThread() {
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                String line;
+                                while ((line = reader.readLine()) != null) {
+                                    incoming.put(ReadResult.line(line));
+                                }
+                                incoming.put(ReadResult.endOfStream());
+                            } catch (IOException e) {
+                                try {
+                                    incoming.put(ReadResult.failure(e));
+                                } catch (InterruptedException interrupted) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                        },
+                        "ai-agent-acp-reader");
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
     }
 
     private static boolean shouldRecord(JSONObject message) {
@@ -309,5 +530,27 @@ final class AcpClientSession {
 
     private static final class ApprovalDeniedException extends IOException {
         private static final long serialVersionUID = 1L;
+    }
+
+    private static final class ReadResult {
+        private final String line;
+        private final IOException failure;
+
+        private ReadResult(String line, IOException failure) {
+            this.line = line;
+            this.failure = failure;
+        }
+
+        static ReadResult line(String line) {
+            return new ReadResult(line, null);
+        }
+
+        static ReadResult endOfStream() {
+            return new ReadResult(null, null);
+        }
+
+        static ReadResult failure(IOException failure) {
+            return new ReadResult(null, failure);
+        }
     }
 }

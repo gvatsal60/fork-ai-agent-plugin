@@ -14,6 +14,7 @@ import io.jenkins.plugins.aiagentjob.claudecode.ClaudeCodeAgentHandler;
 import io.jenkins.plugins.aiagentjob.codex.CodexAgentHandler;
 import io.jenkins.plugins.aiagentjob.cursor.CursorAgentHandler;
 import io.jenkins.plugins.aiagentjob.geminicli.GeminiCliAgentHandler;
+import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.junit.jupiter.api.Test;
@@ -259,6 +260,31 @@ class AiAgentRecordedConversationTest {
                 4,
                 action.getEvents().size(),
                 "Current OpenCode fixture should render 4 visible events");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void grokBuildRecording_usesGrokParserAndStats(JenkinsRule jenkins) throws Exception {
+        FreeStyleProject project =
+                buildProjectWithFixture(
+                        jenkins,
+                        "grok-build-recording",
+                        new GrokBuildAgentHandler(),
+                        "grok-build-conversation.jsonl");
+
+        FreeStyleBuild build = jenkins.buildAndAssertSuccess(project);
+        AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
+        assertNotNull(action);
+
+        assertEquals(
+                List.of("thinking", "assistant", "result"),
+                action.getEvents().stream()
+                        .map(AiAgentLogParser.EventView::getCategory)
+                        .collect(Collectors.toList()));
+        AgentUsageStats stats = action.getUsageStats();
+        assertEquals(25320, stats.getTotalTokens());
+        assertEquals("grok-4.5-build", stats.getDetectedModel());
+        assertEquals(0.01875, stats.getCostUsd(), 0.000001);
     }
 
     @Test

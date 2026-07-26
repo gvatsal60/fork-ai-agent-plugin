@@ -1,10 +1,13 @@
 <div>
   The model identifier to pass to the AI agent (for example
-  <code>claude-sonnet-4</code>, <code>gpt-5.5</code>, <code>gemini-2.5-pro</code>).
+  <code>claude-sonnet-4</code>, <code>gpt-5.5</code>, <code>gemini-2.5-pro</code>,
+  <code>grok-4.5</code>).
   For Codex, Claude Code, and OpenCode, append a recognized reasoning effort with a
-  colon, such as <code>gpt-5.6-sol:xhigh</code>. Other colon suffixes remain part of
-  the model identifier. Use a double colon to keep a recognized suffix literal, such
-  as <code>provider/model::high</code> for model <code>provider/model:high</code>. The
-  separate Reasoning effort field overrides the shorthand.
+  colon, such as <code>gpt-5.6-sol:xhigh</code>. Antigravity CLI and Grok Build accept
+  <code>low</code>, <code>medium</code>, and <code>high</code>, such as
+  <code>grok-4.5:high</code>. Other colon suffixes remain part of the model identifier.
+  Use a double colon to keep a recognized suffix literal, such as
+  <code>provider/model::high</code> for model <code>provider/model:high</code>. The separate
+  Reasoning effort field overrides the shorthand.
   Leave empty to use the agent's default model.
 </div>
