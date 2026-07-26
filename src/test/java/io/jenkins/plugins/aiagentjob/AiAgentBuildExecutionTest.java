@@ -33,7 +33,6 @@ import io.jenkins.plugins.aiagentjob.grokbuild.GrokBuildAgentHandler;
 import io.jenkins.plugins.aiagentjob.opencode.OpenCodeAgentHandler;
 
 import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -945,14 +944,11 @@ class AiAgentBuildExecutionTest {
     @EnabledOnOs(OS.LINUX)
     void grokBuildHeadless_terminalFailuresPropagateWithFailOnAgentError(JenkinsRule jenkins)
             throws Exception {
-        Assumptions.assumeTrue(
-                coreExitCodeResolverAvailable(),
-                "Requires AiAgentTypeHandler.resolveExitCode from PR #34");
         List<Map.Entry<String, String>> failureEvents =
                 List.of(
                         Map.entry(
                                 "cancelled",
-                                "{\"type\":\"end\",\"stopReason\":\"Cancelled\",\"usage\":{\"inputTokens\":1630,\"outputTokens\":32}}"),
+                                "{\"type\":\"end\",\"stopReason\":\"Cancelled\",\"usage\":{\"inputTokens\":10,\"outputTokens\":2}}"),
                         Map.entry("max-turns", "{\"type\":\"max_turns_reached\",\"maxTurns\":4}"),
                         Map.entry("error", "{\"type\":\"error\",\"message\":\"request failed\"}"));
 
@@ -983,15 +979,6 @@ class AiAgentBuildExecutionTest {
             AiAgentRunAction action = build.getAction(AiAgentRunAction.class);
             assertNotNull(action);
             assertEquals(Integer.valueOf(1), action.getExitCode(), caseName);
-        }
-    }
-
-    private static boolean coreExitCodeResolverAvailable() {
-        try {
-            AiAgentTypeHandler.class.getDeclaredMethod("resolveExitCode", int.class, File.class);
-            return true;
-        } catch (NoSuchMethodException ignored) {
-            return false;
         }
     }
 

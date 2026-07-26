@@ -503,6 +503,22 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
+    void grokBuild_modelSuffixSetsReasoningEffortForHeadlessAndAcp() {
+        GrokBuildAgentHandler handler = new GrokBuildAgentHandler();
+        AiAgentBuilder project = createProject(handler);
+        project.setModel("grok-4.5:medium");
+
+        List<String> command = AiAgentCommandFactory.buildDefaultCommand(project, "test");
+        AiAgentTypeHandler.AcpExecutionSpec execution = handler.buildAcpExecution(project);
+        List<String> acpCommand = execution.getCommand();
+
+        assertEquals("grok-4.5", command.get(command.indexOf("--model") + 1));
+        assertEquals("medium", command.get(command.indexOf("--reasoning-effort") + 1));
+        assertEquals("grok-4.5", acpCommand.get(acpCommand.indexOf("--model") + 1));
+        assertEquals("medium", acpCommand.get(acpCommand.indexOf("--reasoning-effort") + 1));
+    }
+
+    @Test
     void grokBuild_acpUsesAuthenticationAndForcesInteractivePermissions() {
         GrokBuildAgentHandler handler = new GrokBuildAgentHandler();
         AiAgentBuilder project = createProject(handler);

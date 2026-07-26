@@ -6,7 +6,7 @@
     <f:textarea />
   </f:entry>
 
-  <f:entry title="Model (optional)" field="model" description="Codex, Claude Code, and OpenCode accept model:effort shorthand, for example gpt-5.6-sol:xhigh. Use a double colon to keep a recognized suffix literal.">
+  <f:entry title="Model (optional)" field="model" description="Supported agents accept model:effort shorthand, for example gpt-5.6-sol:xhigh or grok-4.5:high. Use a double colon to keep a recognized suffix literal.">
     <f:textbox />
   </f:entry>
 

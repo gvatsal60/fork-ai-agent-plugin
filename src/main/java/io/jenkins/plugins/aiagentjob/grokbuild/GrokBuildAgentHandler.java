@@ -192,8 +192,9 @@ public final class GrokBuildAgentHandler extends AiAgentTypeHandler {
                 List.of("xai.api_key", "cached_token"));
     }
 
-    public int resolveExitCode(int processExitCode, File rawLogFile) {
-        if (processExitCode != 0 || rawLogFile == null || !rawLogFile.exists()) {
+    @Override
+    public int resolveExitCode(int processExitCode, File rawLogFile) throws IOException {
+        if (processExitCode != 0 || rawLogFile == null || !rawLogFile.isFile()) {
             return processExitCode;
         }
 
@@ -212,8 +213,6 @@ public final class GrokBuildAgentHandler extends AiAgentTypeHandler {
                 } catch (RuntimeException ignored) {
                 }
             }
-        } catch (IOException ignored) {
-            return processExitCode;
         }
         return processExitCode;
     }
