@@ -14,8 +14,12 @@ import org.kohsuke.stapler.DataBoundConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class CursorAgentHandler extends AiAgentTypeHandler {
+    private static final Set<String> REASONING_EFFORTS =
+            Set.of("none", "minimal", "low", "medium", "high", "xhigh", "max");
+
     @DataBoundConstructor
     public CursorAgentHandler() {}
 
@@ -30,23 +34,56 @@ public final class CursorAgentHandler extends AiAgentTypeHandler {
     }
 
     @Override
+    protected Set<String> getSupportedReasoningEfforts() {
+        return REASONING_EFFORTS;
+    }
+
+    @Override
     public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
         List<String> command = new ArrayList<>();
         command.add("agent");
         command.add("-p");
         command.add("--output-format=stream-json");
         command.add("--trust");
-        command.add("--approve-mcps");
         if (config.isYoloMode()) {
             command.add("--yolo");
+            command.add("--approve-mcps");
         }
-        String model = Util.fixEmptyAndTrim(config.getModel());
+        ModelSelection selection =
+                resolveModelSelection(config.getModel(), config.getReasoningEffort());
+        String model = Util.fixEmptyAndTrim(selection.getModel());
+        String reasoningEffort = Util.fixEmptyAndTrim(selection.getReasoningEffort());
+        if (model == null && reasoningEffort != null) {
+            throw new IllegalArgumentException(
+                    "Cursor Agent reasoning effort requires a model because effort is encoded in "
+                            + "the model alias.");
+        }
         if (model != null) {
+            if (reasoningEffort != null) {
+                model = withReasoningEffort(model, reasoningEffort);
+            }
             command.add("--model");
             command.add(model);
         }
         command.add(prompt);
         return command;
+    }
+
+    private static String withReasoningEffort(String model, String reasoningEffort) {
+        String fastSuffix = model.endsWith("-fast") ? "-fast" : "";
+        String baseModel = fastSuffix.isEmpty() ? model : model.substring(0, model.length() - 5);
+        if (baseModel.endsWith("-extra-high")) {
+            baseModel = baseModel.substring(0, baseModel.length() - 11);
+        } else {
+            for (String effort : REASONING_EFFORTS) {
+                String suffix = "-" + effort;
+                if (baseModel.endsWith(suffix)) {
+                    baseModel = baseModel.substring(0, baseModel.length() - suffix.length());
+                    break;
+                }
+            }
+        }
+        return baseModel + "-" + reasoningEffort + fastSuffix;
     }
 
     @Override

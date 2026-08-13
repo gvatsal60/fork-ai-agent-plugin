@@ -261,16 +261,18 @@ The **Reasoning effort** field is passed only to agents with verified CLI suppor
 
 - Codex CLI: `-c model_reasoning_effort="<value>"`
 - Claude Code: `--effort <value>`
+- Cursor Agent: model alias suffix when **Model** is set, such as `gpt-5.6-sol-xhigh`
 - OpenCode: `--variant <value>`
 - Antigravity CLI: `--effort <value>` (`low`, `medium`, or `high`)
 - Grok Build: `--reasoning-effort <value>` (`low`, `medium`, or `high`)
 
-Gemini CLI and Cursor Agent currently ignore the field in the built-in command template.
+Gemini CLI currently ignores the field in the built-in command template.
 
 For supported agents, the **Model** field also accepts `model:effort` shorthand. For example,
 `gpt-5.6-sol:xhigh` resolves to model `gpt-5.6-sol` and reasoning effort `xhigh`. Recognized
 suffixes depend on the selected agent: Codex accepts `low`, `medium`, `high`, `xhigh`, `max`,
-and `ultra`; Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`; OpenCode also
+and `ultra`; Claude Code accepts `low`, `medium`, `high`, `xhigh`, and `max`; Cursor Agent
+accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; OpenCode also
 accepts `minimal`; and Antigravity CLI and Grok Build accept `low`, `medium`, and `high`.
 Provider-defined support still determines whether a variant is available.
 Other suffixes remain part of the model identifier. Use a double colon to keep a recognized
