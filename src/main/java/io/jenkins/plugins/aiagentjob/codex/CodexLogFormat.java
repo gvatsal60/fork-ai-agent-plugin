@@ -4,6 +4,7 @@ import io.jenkins.plugins.aiagentjob.AiAgentLogFormat;
 import io.jenkins.plugins.aiagentjob.AiAgentLogParser;
 import io.jenkins.plugins.aiagentjob.LogFormatUtils;
 
+import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 /**
@@ -27,6 +28,18 @@ public final class CodexLogFormat implements AiAgentLogFormat {
             return classifyItem(lineNumber, typeLower, item, json.toString(2));
         }
 
+        if ("error".equals(typeLower) || "turn.failed".equals(typeLower)) {
+            JSONObject error = json.optJSONObject("error");
+            String message = LogFormatUtils.firstNonEmpty(error, "message");
+            if (message.isEmpty()) {
+                message = LogFormatUtils.firstNonEmpty(json, "message", "error");
+            }
+            return message.isEmpty()
+                    ? AiAgentLogParser.ParsedLine.raw(lineNumber, "")
+                    : AiAgentLogParser.ParsedLine.result(
+                            lineNumber, "error", "Error", message, json.toString(2));
+        }
+
         // Codex thread/turn lifecycle events
         if (typeLower.startsWith("thread.") || typeLower.startsWith("turn.")) {
             String text = LogFormatUtils.extractText(json);
@@ -43,6 +56,38 @@ public final class CodexLogFormat implements AiAgentLogFormat {
             long lineNumber, String typeLower, JSONObject item, String rawDetails) {
         String itemType = LogFormatUtils.normalize(item.optString("type"));
         String status = LogFormatUtils.normalize(item.optString("status"));
+
+        if (itemType.equals("error")) {
+            String message = LogFormatUtils.firstNonEmpty(item, "message", "error");
+            return message.isEmpty()
+                    ? AiAgentLogParser.ParsedLine.raw(lineNumber, "")
+                    : AiAgentLogParser.ParsedLine.result(
+                            lineNumber, "error", "Error", message, rawDetails);
+        }
+        if (itemType.equals("todo_list")) {
+            String todoList = formatTodoList(item.optJSONArray("items"));
+            return todoList.isEmpty()
+                    ? AiAgentLogParser.ParsedLine.raw(lineNumber, "")
+                    : AiAgentLogParser.ParsedLine.system(lineNumber, "Plan", todoList, rawDetails);
+        }
+        if (itemType.equals("file_change")) {
+            String changes = formatFileChanges(item.optJSONArray("changes"));
+            if (changes.isEmpty()) {
+                return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
+            }
+            String itemId = LogFormatUtils.firstNonEmpty(item, "id");
+            if (typeLower.contains("started") || status.contains("in_progress")) {
+                return AiAgentLogParser.ParsedLine.toolCall(
+                        lineNumber, "file_change", changes, rawDetails, itemId);
+            }
+            return AiAgentLogParser.ParsedLine.toolResult(
+                    lineNumber,
+                    "file_change",
+                    changes,
+                    LogFormatUtils.capitalize(status),
+                    rawDetails,
+                    itemId);
+        }
 
         if (itemType.contains("reason")) {
             String itemText = LogFormatUtils.extractText(item);
@@ -61,12 +106,17 @@ public final class CodexLogFormat implements AiAgentLogFormat {
         }
         if (itemType.contains("command_execution")
                 || itemType.contains("mcp_tool_call")
+                || itemType.contains("collab_tool_call")
+                || itemType.contains("web_search")
                 || itemType.contains("tool_call")
                 || itemType.contains("tool")) {
             String toolCallId = LogFormatUtils.firstNonEmpty(item, "id", "call_id", "tool_call_id");
             String toolName = extractToolName(item, itemType);
             if (toolName.isEmpty() && itemType.contains("command_execution")) {
                 toolName = "bash";
+            }
+            if (toolName.isEmpty() && itemType.contains("web_search")) {
+                toolName = "web_search";
             }
             if (typeLower.contains("started") || status.contains("in_progress")) {
                 String toolInput = extractToolInput(item);
@@ -113,6 +163,9 @@ public final class CodexLogFormat implements AiAgentLogFormat {
         }
 
         String text = LogFormatUtils.firstNonEmpty(item, "input", "query", "path", "url");
+        if (text.isEmpty()) {
+            text = LogFormatUtils.firstNonEmpty(item, "prompt");
+        }
         if (!text.isEmpty()) return text;
         return LogFormatUtils.extractText(item);
     }
@@ -129,7 +182,18 @@ public final class CodexLogFormat implements AiAgentLogFormat {
                     LogFormatUtils.firstNonEmpty(
                             result, "output", "stdout", "stderr", "text", "result");
             if (!output.isEmpty()) return output;
+            output = LogFormatUtils.extractToolResultContent(result);
+            if (!output.isEmpty()) return output;
             if (!result.isEmpty()) return result.toString(2);
+        }
+
+        JSONObject action = item.optJSONObject("action");
+        if (action != null && !action.isEmpty()) {
+            return action.toString(2);
+        }
+        JSONObject agentStates = item.optJSONObject("agents_states");
+        if (agentStates != null && !agentStates.isEmpty()) {
+            return agentStates.toString(2);
         }
 
         if (item.containsKey("exit_code")) {
@@ -143,8 +207,41 @@ public final class CodexLogFormat implements AiAgentLogFormat {
 
     static String extractToolName(JSONObject item, String itemType) {
         String toolName = LogFormatUtils.firstNonEmpty(item, "tool_name", "toolName", "name");
+        if (toolName.isEmpty()) {
+            toolName = LogFormatUtils.firstNonEmpty(item, "tool");
+        }
         if (!toolName.isEmpty()) return toolName;
         if (itemType.contains("mcp")) return "mcp";
         return "";
+    }
+
+    static String formatFileChanges(JSONArray changes) {
+        if (changes == null) return "";
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < changes.size(); i++) {
+            JSONObject change = changes.optJSONObject(i);
+            if (change == null) continue;
+            String path = LogFormatUtils.firstNonEmpty(change, "path");
+            String kind = LogFormatUtils.firstNonEmpty(change, "kind");
+            if (path.isEmpty()) continue;
+            if (text.length() > 0) text.append('\n');
+            if (!kind.isEmpty()) text.append(kind).append(' ');
+            text.append(path);
+        }
+        return text.toString();
+    }
+
+    static String formatTodoList(JSONArray items) {
+        if (items == null) return "";
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < items.size(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            String itemText = LogFormatUtils.firstNonEmpty(item, "text");
+            if (itemText.isEmpty()) continue;
+            if (text.length() > 0) text.append('\n');
+            text.append(item.optBoolean("completed", false) ? "[x] " : "[ ] ").append(itemText);
+        }
+        return text.toString();
     }
 }

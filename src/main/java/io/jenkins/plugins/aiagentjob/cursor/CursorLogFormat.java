@@ -103,6 +103,8 @@ public final class CursorLogFormat implements AiAgentLogFormat {
                 JSONObject result = (JSONObject) resultObj;
                 JSONObject success = result.optJSONObject("success");
                 if (success != null) {
+                    String content = success.optString("content", "");
+                    if (!content.isEmpty()) return content;
                     String stdout = success.optString("stdout", "");
                     String stderr = success.optString("stderr", "");
                     if (!stdout.isEmpty()) return stdout;
