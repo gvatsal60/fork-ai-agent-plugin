@@ -55,9 +55,36 @@ class AiAgentCommandFactoryTest {
         assertTrue(cmd.contains("Hello world"), "Should have prompt");
         assertTrue(cmd.contains("--output-format=stream-json"), "Should have stream-json output");
         assertTrue(cmd.contains("--verbose"), "Should have --verbose");
+        assertTrue(
+                cmd.contains("--no-session-persistence"), "Should not persist CI prompt sessions");
         assertFalse(
                 cmd.contains("--input-format=stream-json"),
                 "Should NOT have --input-format=stream-json (not interactive)");
+    }
+
+    @Test
+    void claudeCode_customExecutableUsesNativeCommandShape() {
+        AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
+        project.setExecutablePath("/opt/agents/claude");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test prompt");
+
+        assertEquals("/opt/agents/claude", cmd.get(0));
+        assertFalse(cmd.contains("-y"));
+        assertFalse(cmd.contains("@anthropic-ai/claude-code"));
+        assertTrue(cmd.contains("--no-session-persistence"));
+    }
+
+    @Test
+    void claudeCode_customNpxExecutableKeepsPackageArguments() {
+        AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
+        project.setExecutablePath("/usr/bin/npx");
+
+        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test prompt");
+
+        assertEquals("/usr/bin/npx", cmd.get(0));
+        assertTrue(cmd.contains("-y"));
+        assertTrue(cmd.contains("@anthropic-ai/claude-code"));
     }
 
     @Test
@@ -144,6 +171,7 @@ class AiAgentCommandFactoryTest {
 
         assertEquals("codex", cmd.get(0));
         assertTrue(cmd.indexOf("exec") > 0, "Should run codex exec");
+        assertTrue(cmd.contains("--ephemeral"), "Should not persist CI rollout files");
         assertTrue(cmd.contains("--json"), "Should have --json for JSONL output");
         assertTrue(
                 cmd.contains("--skip-git-repo-check"),
@@ -269,7 +297,7 @@ class AiAgentCommandFactoryTest {
     void codex_additionalArgsArePlacedInCodexScopes() {
         CodexAgentHandler codex = new CodexAgentHandler();
         codex.setAdditionalGlobalArgs("--search --profile ci");
-        codex.setAdditionalExecArgs("--ephemeral --ignore-user-config --color never");
+        codex.setAdditionalExecArgs("--ignore-user-config --color never");
         AiAgentBuilder project = createProject(codex);
 
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
@@ -727,11 +755,12 @@ class AiAgentCommandFactoryTest {
     void extraArgs_emptyDoesNotAddTokens() {
         AiAgentBuilder project = createProject(new ClaudeCodeAgentHandler());
         project.setExtraArgs("   ");
+        AiAgentBuilder baseline = createProject(new ClaudeCodeAgentHandler());
 
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
-        int verboseIdx = cmd.indexOf("--verbose");
-        assertEquals(
-                verboseIdx, cmd.size() - 1, "Last regular arg should be the last element or close");
+        List<String> baselineCmd = AiAgentCommandFactory.buildDefaultCommand(baseline, "test");
+
+        assertEquals(baselineCmd, cmd);
     }
 
     // ======================== Environment Variable Parsing

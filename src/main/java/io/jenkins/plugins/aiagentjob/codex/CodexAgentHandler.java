@@ -84,6 +84,7 @@ public final class CodexAgentHandler extends AiAgentTypeHandler {
             command.add("model_reasoning_effort=" + tomlString(reasoningEffort));
         }
         command.add("exec");
+        command.add("--ephemeral");
         command.add("--json");
         command.add("--skip-git-repo-check");
         addTokenizedArgs(command, additionalExecArgs);
