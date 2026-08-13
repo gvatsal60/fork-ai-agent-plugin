@@ -13,6 +13,13 @@
 {"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"Focused validation exposed a synthetic configuration mismatch. I will update the fixture project and rerun the same command."}}
 {"type":"item.started","item":{"id":"item_7","type":"file_change","changes":[{"path":"src/config.js","kind":"update"}],"status":"in_progress"}}
 {"type":"item.completed","item":{"id":"item_7","type":"file_change","changes":[{"path":"src/config.js","kind":"update"}],"status":"completed"}}
+{"type":"item.started","item":{"id":"item_web","type":"web_search","query":"Jenkins plugin development guide","action":{"type":"search","query":"Jenkins plugin development guide"}}}
+{"type":"item.completed","item":{"id":"item_web","type":"web_search","query":"Jenkins plugin development guide","action":{"type":"search","query":"Jenkins plugin development guide"}}}
+{"type":"item.started","item":{"id":"item_todo","type":"todo_list","items":[{"text":"Inspect fixture","completed":false},{"text":"Run focused tests","completed":false}]}}
+{"type":"item.updated","item":{"id":"item_todo","type":"todo_list","items":[{"text":"Inspect fixture","completed":true},{"text":"Run focused tests","completed":false}]}}
+{"type":"item.completed","item":{"id":"item_todo","type":"todo_list","items":[{"text":"Inspect fixture","completed":true},{"text":"Run focused tests","completed":true}]}}
+{"type":"item.started","item":{"id":"item_collab","type":"collab_tool_call","tool":"spawn_agent","sender_thread_id":"fixture-thread-main","receiver_thread_ids":[],"prompt":"Review synthetic parser coverage.","agents_states":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_collab","type":"collab_tool_call","tool":"spawn_agent","sender_thread_id":"fixture-thread-main","receiver_thread_ids":["fixture-thread-reviewer"],"prompt":"Review synthetic parser coverage.","agents_states":{"fixture-thread-reviewer":{"status":"completed","message":"Coverage reviewed."}},"status":"completed"}}
 {"type":"item.started","item":{"id":"item_8","type":"command_execution","command":"/usr/bin/zsh -lc 'npm test -- --runInBand'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
 {"type":"item.completed","item":{"id":"item_8","type":"command_execution","command":"/usr/bin/zsh -lc 'npm test -- --runInBand'","aggregated_output":"PASS test/config.test.js\nTests: 8 passed\n","exit_code":0,"status":"completed"}}
 {"type":"item.completed","item":{"id":"item_9","type":"reasoning","status":"completed","text":"Build metadata and focused checks are consistent. Need include tool evidence in final answer."}}
@@ -20,4 +27,4 @@
 {"type":"item.completed","item":{"id":"item_10","type":"mcp_tool_call","status":"completed","name":"list_mcp_resources","result":{"text":"No external resources used for this sanitized fixture."}}}
 {"type":"item.started","item":{"id":"item_11","type":"agent_message","status":"in_progress","text":""}}
 {"type":"item.completed","item":{"id":"item_11","type":"agent_message","text":"Validated sanitized project metadata and focused checks. No private paths, tokens, or user data were included."}}
-{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"output_tokens":120,"reasoning_output_tokens":40}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":800,"cache_write_input_tokens":200,"output_tokens":120,"reasoning_output_tokens":40}}

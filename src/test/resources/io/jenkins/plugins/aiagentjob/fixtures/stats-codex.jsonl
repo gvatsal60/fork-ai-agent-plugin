@@ -1,4 +1,4 @@
 {"type":"thread.started","thread_id":"test-codex-thread-01"}
 {"type":"turn.started"}
 {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"OK"}}
-{"type":"turn.completed","usage":{"input_tokens":42581,"cached_input_tokens":30976,"output_tokens":108,"reasoning_output_tokens":49}}
+{"type":"turn.completed","usage":{"input_tokens":42581,"cached_input_tokens":30976,"cache_write_input_tokens":512,"output_tokens":108,"reasoning_output_tokens":49}}

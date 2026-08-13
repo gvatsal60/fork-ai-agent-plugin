@@ -4,6 +4,7 @@ import io.jenkins.plugins.aiagentjob.AiAgentLogFormat;
 import io.jenkins.plugins.aiagentjob.AiAgentLogParser;
 import io.jenkins.plugins.aiagentjob.LogFormatUtils;
 
+import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 
 import java.util.List;
@@ -67,7 +68,54 @@ public final class AntigravityLogFormat implements AiAgentLogFormat {
         if ("tool".equals(stepType)) {
             return classifyToolUpdate(lineNumber, update, stepId, rawDetails);
         }
+        if ("subagent".equals(stepType) || "subagent_info".equals(stepType)) {
+            return classifySubagentUpdate(lineNumber, update, stepId, rawDetails);
+        }
         return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
+    }
+
+    private static AiAgentLogParser.ParsedLine classifySubagentUpdate(
+            long lineNumber, JSONObject update, String stepId, String rawDetails) {
+        JSONObject info = update.optJSONObject("subagent_info");
+        JSONArray subagents = info == null ? null : info.optJSONArray("subagents");
+        String input = formatSubagents(subagents, true);
+        if (input.isEmpty()) {
+            return AiAgentLogParser.ParsedLine.raw(lineNumber, "");
+        }
+        String toolName = LogFormatUtils.firstNonEmpty(update, "tool_name");
+        if (toolName.isEmpty()) toolName = "subagent";
+        String state = LogFormatUtils.normalize(update.optString("state", ""));
+        if ("active".equals(state)) {
+            return AiAgentLogParser.ParsedLine.toolCall(
+                            lineNumber, toolName, input, rawDetails, stepId)
+                    .withDeduplicationKey("antigravity-subagent-call:" + stepId);
+        }
+        String output = formatSubagents(subagents, false);
+        if (output.isEmpty()) output = LogFormatUtils.capitalize(state);
+        return AiAgentLogParser.ParsedLine.toolResult(
+                        lineNumber, toolName, input, output, rawDetails, stepId)
+                .withDeduplicationKey("antigravity-subagent-result:" + stepId);
+    }
+
+    static String formatSubagents(JSONArray subagents, boolean includePrompt) {
+        if (subagents == null) return "";
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < subagents.size(); i++) {
+            Object value = subagents.get(i);
+            if (!(value instanceof JSONObject)) continue;
+            JSONObject subagent = (JSONObject) value;
+            String role = LogFormatUtils.firstNonEmpty(subagent, "role", "type_name");
+            String detail =
+                    includePrompt
+                            ? LogFormatUtils.firstNonEmpty(subagent, "initial_prompt")
+                            : LogFormatUtils.firstNonEmpty(subagent, "conversation_id", "status");
+            if (role.isEmpty() && detail.isEmpty()) continue;
+            if (text.length() > 0) text.append('\n');
+            text.append(role);
+            if (!role.isEmpty() && !detail.isEmpty()) text.append(": ");
+            text.append(detail);
+        }
+        return text.toString();
     }
 
     private static AiAgentLogParser.ParsedLine classifyToolUpdate(

@@ -33,9 +33,11 @@ public final class GrokBuildStatsExtractor implements AiAgentStatsExtractor {
         }
 
         long cachedInput = usage.optLong("cachedReadTokens", 0);
+        long cacheCreation = usage.optLong("cacheCreationTokens", 0);
         long fullInput = usage.optLong("inputTokens", 0);
-        stats.addInputTokens(Math.max(0, fullInput - cachedInput));
+        stats.addInputTokens(Math.max(0, fullInput - cachedInput - cacheCreation));
         stats.addCacheReadTokens(cachedInput);
+        stats.addCacheWriteTokens(cacheCreation);
         stats.addOutputTokens(usage.optLong("outputTokens", 0));
         stats.addReasoningTokens(usage.optLong("reasoningTokens", 0));
         stats.addTotalTokens(usage.optLong("totalTokens", 0));
@@ -56,6 +58,7 @@ public final class GrokBuildStatsExtractor implements AiAgentStatsExtractor {
         if (usage != null) {
             stats.addInputTokens(usage.optLong("input_tokens", 0));
             stats.addCacheReadTokens(usage.optLong("cache_read_input_tokens", 0));
+            stats.addCacheWriteTokens(usage.optLong("cache_creation_input_tokens", 0));
             stats.addOutputTokens(usage.optLong("output_tokens", 0));
             stats.addReasoningTokens(usage.optLong("reasoning_tokens", 0));
             stats.addTotalTokens(usage.optLong("total_tokens", 0));

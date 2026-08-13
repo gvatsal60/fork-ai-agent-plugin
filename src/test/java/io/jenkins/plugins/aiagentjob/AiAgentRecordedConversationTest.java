@@ -116,7 +116,7 @@ class AiAgentRecordedConversationTest {
         assertTrue(cats.contains("tool_call"), "Should have tool_call");
         assertTrue(cats.contains("tool_result"), "Should have tool_result");
         assertTrue(cats.contains("assistant"), "Should have assistant");
-        assertEquals(17, events.size(), "Current Codex fixture should render 17 visible events");
+        assertEquals(26, events.size(), "Current Codex fixture should render 26 visible events");
         List<AiAgentLogParser.EventView> completedCommands =
                 events.stream()
                         .filter(e -> "tool_result".equals(e.getCategory()))
@@ -209,8 +209,16 @@ class AiAgentRecordedConversationTest {
                 action.getEvents().stream()
                         .map(AiAgentLogParser.EventView::getCategory)
                         .collect(Collectors.toList());
-        assertEquals(List.of("system", "tool_call", "tool_result", "assistant"), cats);
-        assertEquals(1, action.getUsageStats().getToolCalls());
+        assertEquals(
+                List.of(
+                        "system",
+                        "tool_call",
+                        "tool_result",
+                        "tool_call",
+                        "tool_result",
+                        "assistant"),
+                cats);
+        assertEquals(2, action.getUsageStats().getToolCalls());
         assertEquals("gemini-3.6-flash-low", action.getUsageStats().getDetectedModel());
     }
 
@@ -277,7 +285,7 @@ class AiAgentRecordedConversationTest {
         assertNotNull(action);
 
         assertEquals(
-                List.of("thinking", "assistant", "result"),
+                List.of("thinking", "system", "tool_call", "tool_result", "assistant", "result"),
                 action.getEvents().stream()
                         .map(AiAgentLogParser.EventView::getCategory)
                         .collect(Collectors.toList()));

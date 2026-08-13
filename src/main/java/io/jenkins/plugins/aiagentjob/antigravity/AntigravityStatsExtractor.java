@@ -44,7 +44,10 @@ public final class AntigravityStatsExtractor implements AiAgentStatsExtractor {
         if (usage != null) {
             accumulateUsage(usage, stats);
         }
-        if ("tool".equals(LogFormatUtils.normalize(update.optString("step_type")))) {
+        String stepType = LogFormatUtils.normalize(update.optString("step_type"));
+        if ("tool".equals(stepType)
+                || "subagent".equals(stepType)
+                || "subagent_info".equals(stepType)) {
             stats.recordToolCall(AntigravityLogFormat.stepId(update));
         }
     }
