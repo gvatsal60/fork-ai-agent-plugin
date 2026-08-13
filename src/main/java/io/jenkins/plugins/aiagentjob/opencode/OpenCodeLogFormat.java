@@ -105,7 +105,7 @@ public final class OpenCodeLogFormat implements AiAgentLogFormat {
 
         if (!toolOutput.isEmpty()) {
             return AiAgentLogParser.ParsedLine.toolResult(
-                    lineNumber, toolName, toolOutput, rawDetails, toolCallId);
+                    lineNumber, toolName, toolInput, toolOutput, rawDetails, toolCallId);
         }
         if ("completed".equals(status)) {
             return AiAgentLogParser.ParsedLine.raw(lineNumber, "");

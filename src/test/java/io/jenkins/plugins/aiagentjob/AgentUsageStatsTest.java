@@ -107,7 +107,7 @@ class AgentUsageStatsTest {
         assertEquals(1317, stats.getTotalTokens());
         assertEquals(1250, stats.getDurationMs());
         assertEquals(1, stats.getNumTurns());
-        assertEquals(1, stats.getToolCalls());
+        assertEquals(2, stats.getToolCalls());
         assertEquals("gemini-3.6-flash-low", stats.getDetectedModel());
         assertEquals("", stats.getCostDisplay());
     }
@@ -130,6 +130,7 @@ class AgentUsageStatsTest {
         assertEquals(42581, stats.getInputTokens());
         assertEquals(108, stats.getOutputTokens());
         assertEquals(30976, stats.getCacheReadTokens());
+        assertEquals(512, stats.getCacheWriteTokens());
         assertEquals(49, stats.getReasoningTokens());
         assertEquals(42689, stats.getTotalTokens());
     }
@@ -229,8 +230,9 @@ class AgentUsageStatsTest {
                 parseStats("grok-build-conversation.jsonl", GrokBuildStatsExtractor.INSTANCE);
 
         assertTrue(stats.hasData());
-        assertEquals(6200, stats.getInputTokens());
+        assertEquals(5900, stats.getInputTokens());
         assertEquals(18400, stats.getCacheReadTokens());
+        assertEquals(300, stats.getCacheWriteTokens());
         assertEquals(720, stats.getOutputTokens());
         assertEquals(340, stats.getReasoningTokens());
         assertEquals(25320, stats.getTotalTokens());
@@ -245,8 +247,9 @@ class AgentUsageStatsTest {
                 parseStats("grok-build-acp-conversation.jsonl", GrokBuildStatsExtractor.INSTANCE);
 
         assertTrue(stats.hasData());
-        assertEquals(3000, stats.getInputTokens());
+        assertEquals(2750, stats.getInputTokens());
         assertEquals(9000, stats.getCacheReadTokens());
+        assertEquals(250, stats.getCacheWriteTokens());
         assertEquals(400, stats.getOutputTokens());
         assertEquals(120, stats.getReasoningTokens());
         assertEquals(12400, stats.getTotalTokens());
