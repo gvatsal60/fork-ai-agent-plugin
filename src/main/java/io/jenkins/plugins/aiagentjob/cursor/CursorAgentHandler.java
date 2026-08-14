@@ -36,9 +36,9 @@ public final class CursorAgentHandler extends AiAgentTypeHandler {
         command.add("-p");
         command.add("--output-format=stream-json");
         command.add("--trust");
-        command.add("--approve-mcps");
         if (config.isYoloMode()) {
             command.add("--yolo");
+            command.add("--approve-mcps");
         }
         String model = Util.fixEmptyAndTrim(config.getModel());
         if (model != null) {

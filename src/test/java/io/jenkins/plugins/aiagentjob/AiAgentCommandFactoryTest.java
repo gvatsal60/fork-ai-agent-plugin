@@ -329,7 +329,7 @@ class AiAgentCommandFactoryTest {
                 cmd.contains("--output-format=stream-json"),
                 "Should have --output-format=stream-json");
         assertTrue(cmd.contains("--trust"), "Should have --trust for headless mode");
-        assertTrue(cmd.contains("--approve-mcps"), "Should have --approve-mcps for headless mode");
+        assertFalse(cmd.contains("--approve-mcps"), "Should not auto-approve MCP servers");
         assertTrue(cmd.contains("analyze code"), "Should have prompt");
     }
 
@@ -341,6 +341,7 @@ class AiAgentCommandFactoryTest {
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
 
         assertTrue(cmd.contains("--yolo"), "Should have --yolo");
+        assertTrue(cmd.contains("--approve-mcps"), "Yolo mode should approve MCP servers");
     }
 
     @Test
