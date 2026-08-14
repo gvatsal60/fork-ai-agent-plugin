@@ -396,10 +396,12 @@ public final class AgentUsageStats implements Serializable {
                 Math.max(
                         cacheWriteTokens,
                         usage.optLong(
-                                "cache_creation_input_tokens",
+                                "cache_write_input_tokens",
                                 usage.optLong(
-                                        "cacheWriteTokens",
-                                        usage.optLong("cacheCreationInputTokens", 0))));
+                                        "cache_creation_input_tokens",
+                                        usage.optLong(
+                                                "cacheWriteTokens",
+                                                usage.optLong("cacheCreationInputTokens", 0)))));
         reasoningTokens =
                 Math.max(
                         reasoningTokens,

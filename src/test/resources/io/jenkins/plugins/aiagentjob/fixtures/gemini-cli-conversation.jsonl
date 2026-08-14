@@ -1,9 +1,9 @@
-{"type":"init","timestamp":"2026-03-07T03:24:37.343Z","session_id":"212327e6-142f-4afe-a7b9-0a2468f21bfe","model":"gemini-3.1-pro-preview"}
+{"type":"init","timestamp":"2026-01-01T00:00:00.000Z","session_id":"gemini-fixture-session-01","model":"gemini-3.1-pro-preview"}
 {"type":"message","timestamp":"2026-03-07T03:24:37.343Z","role":"user","content":"summarize this project for me"}
-{"type":"tool_use","timestamp":"2026-03-07T03:24:42.351Z","tool_name":"read_file","tool_id":"read_file_1772853882351_0","parameters":{"file_path":"/Users/bruno.volpato/githubworkspace/jenkins-ai-agent-plugin/README.md"}}
-{"type":"tool_use","timestamp":"2026-03-07T03:24:42.438Z","tool_name":"read_file","tool_id":"read_file_1772853882438_1","parameters":{"file_path":"/Users/bruno.volpato/githubworkspace/jenkins-ai-agent-plugin/pom.xml"}}
-{"type":"tool_result","timestamp":"2026-03-07T03:24:42.534Z","tool_id":"read_file_1772853882351_0","status":"success","output":""}
-{"type":"tool_result","timestamp":"2026-03-07T03:24:42.534Z","tool_id":"read_file_1772853882438_1","status":"success","output":""}
+{"type":"tool_use","timestamp":"2026-01-01T00:00:01.000Z","tool_name":"read_file","tool_id":"gemini-fixture-tool-01","parameters":{"file_path":"/workspace/sample-plugin/README.md"}}
+{"type":"tool_use","timestamp":"2026-01-01T00:00:02.000Z","tool_name":"read_file","tool_id":"gemini-fixture-tool-02","parameters":{"file_path":"/workspace/sample-plugin/pom.xml"}}
+{"type":"tool_result","timestamp":"2026-01-01T00:00:03.000Z","tool_id":"gemini-fixture-tool-01","status":"success","output":""}
+{"type":"tool_result","timestamp":"2026-01-01T00:00:04.000Z","tool_id":"gemini-fixture-tool-02","status":"success","output":""}
 {"type":"message","timestamp":"2026-03-07T03:24:51.877Z","role":"assistant","content":"This project, **Jenkins AI Agent Plugin**, is a Jenkins plugin that introduces a reusable **AI Agent** build step.","delta":true}
 {"type":"message","timestamp":"2026-03-07T03:24:53.737Z","role":"assistant","content":"It supports live conversation views, approval gates, and usage statistics for multiple coding agents.","delta":true}
 {"type":"result","timestamp":"2026-03-07T03:24:55.825Z","status":"success","stats":{"total_tokens":17401,"input_tokens":15940,"output_tokens":612,"cached":6143,"input":9797,"duration_ms":18483,"tool_calls":2}}

@@ -215,7 +215,7 @@ class AiAgentLogParserTest {
                 cats.contains("tool_result"),
                 "Should have tool_result (command_execution completed)");
         assertTrue(cats.contains("assistant"), "Should have assistant (agent_message)");
-        assertEquals(17, events.size(), "Current Codex fixture should keep 17 visible events");
+        assertEquals(26, events.size(), "Current Codex fixture should keep 26 visible events");
     }
 
     @Test
@@ -227,12 +227,15 @@ class AiAgentLogParserTest {
                         .filter(e -> "tool_call".equals(e.getCategory()))
                         .collect(Collectors.toList());
 
-        assertEquals(6, toolCalls.size(), "Should have 5 command starts and 1 MCP tool call");
+        assertEquals(9, toolCalls.size(), "Should keep every started tool visible");
         assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("rg --files")));
         assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("sed -n")));
         assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("mvn -q")));
         assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("npm test")));
         assertTrue(toolCalls.stream().anyMatch(e -> e.getToolInput().contains("server")));
+        assertTrue(toolCalls.stream().anyMatch(e -> e.getLabel().equals("file_change")));
+        assertTrue(toolCalls.stream().anyMatch(e -> e.getLabel().equals("web_search")));
+        assertTrue(toolCalls.stream().anyMatch(e -> e.getLabel().equals("spawn_agent")));
     }
 
     @Test
@@ -241,8 +244,8 @@ class AiAgentLogParserTest {
                 parseFixture("codex-conversation.jsonl", CodexLogFormat.INSTANCE);
         long started = events.stream().filter(e -> "tool_call".equals(e.getCategory())).count();
         long completed = events.stream().filter(e -> "tool_result".equals(e.getCategory())).count();
-        assertEquals(6, started, "Fixture should keep command and MCP starts visible");
-        assertEquals(6, completed, "Command completions should render even without output");
+        assertEquals(9, started, "Fixture should keep all tool starts visible");
+        assertEquals(9, completed, "Tool completions should render even without output");
     }
 
     @Test
@@ -254,7 +257,7 @@ class AiAgentLogParserTest {
                         .filter(e -> "tool_result".equals(e.getCategory()))
                         .collect(Collectors.toList());
 
-        assertEquals(6, toolResults.size(), "Should have 6 visible tool results");
+        assertEquals(9, toolResults.size(), "Should have 9 visible tool results");
         assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("README.md")));
         assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("sample-plugin")));
         assertTrue(toolResults.stream().anyMatch(e -> e.getToolOutput().contains("1 failed")));
@@ -382,12 +385,23 @@ class AiAgentLogParserTest {
                 parseFixture("antigravity-cli-conversation.jsonl", AntigravityLogFormat.INSTANCE);
 
         assertEquals(
-                List.of("system", "tool_call", "tool_result", "assistant"), categories(events));
+                List.of(
+                        "system",
+                        "tool_call",
+                        "tool_result",
+                        "tool_call",
+                        "tool_result",
+                        "assistant"),
+                categories(events));
         AiAgentLogParser.EventView toolCall = events.get(1);
         AiAgentLogParser.EventView toolResult = events.get(2);
         assertEquals("printf 'fixture-output\\n'", toolCall.getToolInput());
         assertEquals("fixture-output", toolResult.getToolOutput());
-        assertEquals("AGY_TOOL_OK", events.get(3).getContent().trim());
+        assertEquals(
+                "Fixture Reviewer: Review synthetic parser coverage.",
+                events.get(3).getToolInput());
+        assertEquals("Fixture Reviewer: fixture-subagent-01", events.get(4).getToolOutput());
+        assertEquals("AGY_TOOL_OK", events.get(5).getContent().trim());
     }
 
     @Test
@@ -460,6 +474,9 @@ class AiAgentLogParserTest {
         assertTrue(
                 toolResults.stream().allMatch(e -> !e.getToolOutput().isEmpty()),
                 "OpenCode tool results should show nested state output");
+        assertTrue(
+                toolResults.stream().allMatch(e -> !e.getToolInput().isEmpty()),
+                "OpenCode tool results should preserve their input");
 
         AiAgentLogParser.EventView assistant =
                 events.stream()
@@ -499,17 +516,22 @@ class AiAgentLogParserTest {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("grok-build-conversation.jsonl", GrokBuildLogFormat.INSTANCE);
 
-        assertEquals(3, events.size());
+        assertEquals(6, events.size());
         assertEquals("thinking", events.get(0).getCategory());
         assertEquals(
                 "Reviewing the repository structure before proposing changes.",
                 events.get(0).getContent());
-        assertEquals("assistant", events.get(1).getCategory());
+        assertEquals("system", events.get(1).getCategory());
+        assertEquals("tool_call", events.get(2).getCategory());
+        assertEquals("mvn -q -DskipTests package", events.get(2).getToolInput());
+        assertEquals("tool_result", events.get(3).getCategory());
+        assertEquals("Build passed", events.get(3).getToolOutput());
+        assertEquals("assistant", events.get(4).getCategory());
         assertEquals(
                 "Review complete.\n\nThe build configuration is consistent, and the focused checks pass.",
-                events.get(1).getContent());
-        assertEquals("result", events.get(2).getCategory());
-        assertEquals("EndTurn", events.get(2).getContent());
+                events.get(4).getContent());
+        assertEquals("result", events.get(5).getCategory());
+        assertEquals("EndTurn", events.get(5).getContent());
     }
 
     @Test
@@ -681,6 +703,27 @@ class AiAgentLogParserTest {
     }
 
     @Test
+    void parseLine_handlesCodexFailuresAndCurrentItems() {
+        AiAgentLogParser.EventView failure =
+                AiAgentLogParser.parseLine(
+                                1,
+                                "{\"type\":\"turn.failed\",\"error\":{\"message\":\"synthetic failure\"}}",
+                                CodexLogFormat.INSTANCE)
+                        .toEventView();
+        AiAgentLogParser.EventView todo =
+                AiAgentLogParser.parseLine(
+                                2,
+                                "{\"type\":\"item.updated\",\"item\":{\"id\":\"todo-1\",\"type\":\"todo_list\",\"items\":[{\"text\":\"Review parser\",\"completed\":true}]}}",
+                                CodexLogFormat.INSTANCE)
+                        .toEventView();
+
+        assertEquals("error", failure.getCategory());
+        assertEquals("synthetic failure", failure.getContent());
+        assertEquals("system", todo.getCategory());
+        assertEquals("[x] Review parser", todo.getContent());
+    }
+
+    @Test
     void parseLine_skipsCodexStructuralEventsWithoutDisplayableText() {
         AiAgentLogParser.ParsedLine threadStarted =
                 AiAgentLogParser.parseLine(
@@ -769,6 +812,17 @@ class AiAgentLogParserTest {
         AiAgentLogParser.ParsedLine line =
                 AiAgentLogParser.parseLine(1, json, CursorLogFormat.INSTANCE);
         assertEquals("tool_result", line.toEventView().getCategory());
+    }
+
+    @Test
+    void parseLine_extractsCursorReadContentFromSuccessWrapper() {
+        String json =
+                "{\"type\":\"tool_call\",\"subtype\":\"completed\",\"call_id\":\"read-1\",\"tool_call\":{\"readToolCall\":{\"result\":{\"success\":{\"content\":\"fixture content\"}}}}}";
+
+        AiAgentLogParser.EventView event =
+                AiAgentLogParser.parseLine(1, json, CursorLogFormat.INSTANCE).toEventView();
+
+        assertEquals("fixture content", event.getToolOutput());
     }
 
     @Test
@@ -924,7 +978,7 @@ class AiAgentLogParserTest {
     void codexConversation_hasCorrectEventCount() throws IOException {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("codex-conversation.jsonl", CodexLogFormat.INSTANCE);
-        assertEquals(17, events.size(), "Current Codex fixture should produce 17 visible events");
+        assertEquals(26, events.size(), "Current Codex fixture should produce 26 visible events");
     }
 
     @Test
@@ -946,7 +1000,7 @@ class AiAgentLogParserTest {
         List<AiAgentLogParser.EventView> events =
                 parseFixture("antigravity-cli-conversation.jsonl", AntigravityLogFormat.INSTANCE);
         assertEquals(
-                4, events.size(), "Current Antigravity fixture should produce 4 visible events");
+                6, events.size(), "Current Antigravity fixture should produce 6 visible events");
     }
 
     @Test
