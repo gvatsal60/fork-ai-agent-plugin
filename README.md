@@ -67,7 +67,7 @@ Build page showing a Cursor Agent conversation with tool calls, markdown-rendere
    - **Approvals** — require human approval for tool calls.
    - **Setup script** — shell commands to run before the agent (install tools, source dotfiles, configure runtime variables).
    - **Custom Codex config.toml** — optional, shown only for Codex runs to override settings/MCP per job.
-   - **Additional Codex args** — optional, shown only for Codex runs to pass global flags like `--search` or exec flags like `--ephemeral`.
+   - **Additional Codex args** — optional, shown only for Codex runs to pass global flags like `--search` or exec flags like `--ignore-user-config`.
    - **Environment variables** — inject additional env vars (`KEY=VALUE`, one per line).
    - **Command override** — replace the default command template entirely.
    - **Extra CLI args** — append flags to the generated command.
@@ -149,7 +149,7 @@ aiAgent(
     customConfigEnabled: true,
     customConfigToml: 'model = \"gpt-5.5\"',
     additionalGlobalArgs: '--search',
-    additionalExecArgs: '--ephemeral --color never'
+    additionalExecArgs: '--color never'
   ),
   prompt: 'Summarize this project',
   reasoningEffort: 'xhigh'
@@ -203,8 +203,8 @@ The plugin injects these variables into every build:
 Jenkins services and agents do not load interactive shell startup files, so their `PATH` often
 differs from an interactive terminal. Set **Executable path** to the agent launcher on the build
 node, such as `$HOME/.local/bin/codex`. The plugin keeps the generated arguments and replaces only
-the executable. For Claude Code, this setting replaces the `npx` launcher; use **Command override**
-when the entire command shape must change.
+the executable. For Claude Code, setting a path selects the native `claude` command shape instead
+of the default `npx` launcher.
 
 ### Setup Script
 
@@ -246,14 +246,18 @@ overrides apply only to that job run.
 By default, Codex runs as:
 
 ```bash
-codex --sandbox workspace-write --ask-for-approval never exec --json --skip-git-repo-check '<prompt>'
+codex --sandbox workspace-write --ask-for-approval never exec --ephemeral --json --skip-git-repo-check '<prompt>'
 ```
 
 Use **Additional Codex global args** for flags that must appear before `exec`, such as
 `--search`, `--profile ci`, `-c key=value`, `--enable feature`, or `--image path.png`.
-Use **Additional Codex exec args** for flags after `exec`, such as `--ephemeral`,
-`--ignore-user-config`, `--ignore-rules`, `--add-dir path`, `--output-schema schema.json`,
+Use **Additional Codex exec args** for flags after `exec`, such as `--ignore-user-config`,
+`--ignore-rules`, `--add-dir path`, `--output-schema schema.json`,
 or `--color never`. Keep secrets in Jenkins credentials or config, not in CLI args.
+
+Built-in Claude Code and Codex commands disable session persistence because Jenkins runs already
+retain their conversation artifacts on the build. Use **Command override** when resumable CLI
+session state is required outside Jenkins.
 
 ### Reasoning Effort
 

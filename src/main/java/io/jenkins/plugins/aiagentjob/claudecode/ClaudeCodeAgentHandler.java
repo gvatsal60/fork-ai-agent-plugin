@@ -41,13 +41,19 @@ public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
     @Override
     public List<String> buildDefaultCommand(AiAgentConfiguration config, String prompt) {
         List<String> command = new ArrayList<>();
-        command.add("npx");
-        command.add("-y");
-        command.add("@anthropic-ai/claude-code");
+        String executablePath = Util.fixEmptyAndTrim(config.getExecutablePath());
+        if (executablePath == null || isNpx(executablePath)) {
+            command.add("npx");
+            command.add("-y");
+            command.add("@anthropic-ai/claude-code");
+        } else {
+            command.add("claude");
+        }
         command.add("-p");
         command.add(prompt);
         command.add("--output-format=stream-json");
         command.add("--verbose");
+        command.add("--no-session-persistence");
         if (config.isYoloMode()) {
             command.add("--dangerously-skip-permissions");
         }
@@ -64,6 +70,12 @@ public final class ClaudeCodeAgentHandler extends AiAgentTypeHandler {
             command.add(reasoningEffort);
         }
         return command;
+    }
+
+    private static boolean isNpx(String executablePath) {
+        String normalized = executablePath.replace('\\', '/');
+        String name = normalized.substring(normalized.lastIndexOf('/') + 1);
+        return "npx".equalsIgnoreCase(name) || "npx.cmd".equalsIgnoreCase(name);
     }
 
     @Override
