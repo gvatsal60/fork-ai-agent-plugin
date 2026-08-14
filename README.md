@@ -149,7 +149,7 @@ aiAgent(
     customConfigEnabled: true,
     customConfigToml: 'model = \"gpt-5.5\"',
     additionalGlobalArgs: '--search',
-    additionalExecArgs: '--ephemeral --color never'
+    additionalExecArgs: '--color never'
   ),
   prompt: 'Summarize this project',
   reasoningEffort: 'xhigh'

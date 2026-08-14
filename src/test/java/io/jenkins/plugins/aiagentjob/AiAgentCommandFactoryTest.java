@@ -297,7 +297,7 @@ class AiAgentCommandFactoryTest {
     void codex_additionalArgsArePlacedInCodexScopes() {
         CodexAgentHandler codex = new CodexAgentHandler();
         codex.setAdditionalGlobalArgs("--search --profile ci");
-        codex.setAdditionalExecArgs("--ignore-user-config --color never");
+        codex.setAdditionalExecArgs("--ephemeral --ignore-user-config --color never");
         AiAgentBuilder project = createProject(codex);
 
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
@@ -308,6 +308,7 @@ class AiAgentCommandFactoryTest {
         assertTrue(cmd.indexOf("--profile") > 0 && cmd.indexOf("--profile") < execIdx);
         assertEquals("ci", cmd.get(cmd.indexOf("--profile") + 1));
         assertTrue(cmd.indexOf("--ephemeral") > execIdx && cmd.indexOf("--ephemeral") < promptIdx);
+        assertEquals(1, cmd.stream().filter("--ephemeral"::equals).count());
         assertTrue(
                 cmd.indexOf("--ignore-user-config") > execIdx
                         && cmd.indexOf("--ignore-user-config") < promptIdx);
