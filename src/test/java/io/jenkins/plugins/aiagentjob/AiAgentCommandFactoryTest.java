@@ -357,37 +357,13 @@ class AiAgentCommandFactoryTest {
     }
 
     @Test
-    void cursorAgent_appliesReasoningEffortToModelAlias() {
+    void cursorAgent_preservesReasoningLikeModelSuffix() {
         AiAgentBuilder project = createProject(new CursorAgentHandler());
-        project.setModel("gpt-5.6-sol:xhigh");
+        project.setModel("cursor-model:high");
 
         List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
 
-        assertEquals("gpt-5.6-sol-xhigh", cmd.get(cmd.indexOf("--model") + 1));
-    }
-
-    @Test
-    void cursorAgent_explicitReasoningEffortOverridesModelSuffix() {
-        AiAgentBuilder project = createProject(new CursorAgentHandler());
-        project.setModel("gpt-5.6-sol-high-fast");
-        project.setReasoningEffort("max");
-
-        List<String> cmd = AiAgentCommandFactory.buildDefaultCommand(project, "test");
-
-        assertEquals("gpt-5.6-sol-max-fast", cmd.get(cmd.indexOf("--model") + 1));
-    }
-
-    @Test
-    void cursorAgent_reasoningEffortRequiresModel() {
-        AiAgentBuilder project = createProject(new CursorAgentHandler());
-        project.setReasoningEffort("high");
-
-        IllegalArgumentException error =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> AiAgentCommandFactory.buildDefaultCommand(project, "test"));
-
-        assertTrue(error.getMessage().contains("requires a model"));
+        assertEquals("cursor-model:high", cmd.get(cmd.indexOf("--model") + 1));
     }
 
     @Test
