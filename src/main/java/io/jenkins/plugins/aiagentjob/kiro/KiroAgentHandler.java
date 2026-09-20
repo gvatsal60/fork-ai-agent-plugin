@@ -49,6 +49,11 @@ public final class KiroAgentHandler extends AiAgentTypeHandler {
         command.add(prompt);
         ModelSelection selection =
                 resolveModelSelection(config.getModel(), config.getReasoningEffort());
+        String model = Util.fixEmptyAndTrim(selection.getModel());
+        if (model != null) {
+            command.add("--model");
+            command.add(model);
+        }
         String reasoningEffort = Util.fixEmptyAndTrim(selection.getReasoningEffort());
         if (reasoningEffort != null) {
             command.add("--effort");

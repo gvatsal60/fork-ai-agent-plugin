@@ -38,7 +38,7 @@ public final class KiroStatsExtractor implements AiAgentStatsExtractor {
         if ("assistantmessage".equals(kind)) {
             JSONObject data = json.optJSONObject("data");
             if (data != null) {
-                stats.incrementNumTurns(1);
+                stats.addNumTurns(stats.getNumTurns() + 1);
                 JSONObject usage = data.optJSONObject("usage");
                 if (usage != null) {
                     accumulateUsage(usage, stats);

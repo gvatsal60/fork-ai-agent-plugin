@@ -16,6 +16,9 @@ public final class KiroLogFormat implements AiAgentLogFormat {
 
     private KiroLogFormat() {}
 
+    private static final java.util.regex.Pattern ANSI_PATTERN =
+            java.util.regex.Pattern.compile("\u001b\\[[0-9;]*m");
+
     @Override
     public AiAgentLogParser.ParsedLine classify(long lineNumber, JSONObject json) {
         List<AiAgentLogParser.ParsedLine> parsed = classifyAll(lineNumber, json);
@@ -35,6 +38,28 @@ public final class KiroLogFormat implements AiAgentLogFormat {
         String type = LogFormatUtils.normalize(json.optString("type", ""));
         if (!type.isEmpty()) {
             return classifyTypedJson(lineNumber, json, type);
+        }
+        return null;
+    }
+
+    @Override
+    public List<AiAgentLogParser.ParsedLine> classifyRaw(long lineNumber, String line) {
+        String stripped = ANSI_PATTERN.matcher(line).replaceAll("").trim();
+        if (stripped.startsWith("> ")) {
+            String text = stripped.substring(2);
+            if (!text.isEmpty()) {
+                return List.of(
+                        AiAgentLogParser.ParsedLine.message(
+                                lineNumber, "assistant", "Assistant", text, line));
+            }
+        }
+        if (stripped.startsWith(">")) {
+            String text = stripped.substring(1).trim();
+            if (!text.isEmpty()) {
+                return List.of(
+                        AiAgentLogParser.ParsedLine.message(
+                                lineNumber, "assistant", "Assistant", text, line));
+            }
         }
         return null;
     }
@@ -251,27 +276,41 @@ public final class KiroLogFormat implements AiAgentLogFormat {
                         AiAgentLogParser.ParsedLine.system(
                                 lineNumber, "System", "Model: " + model, rawDetails));
             }
+            return null;
         }
-        return null;
-    }
-
-    @Override
-    public List<AiAgentLogParser.ParsedLine> classifyRaw(long lineNumber, String line) {
-        String stripped = stripAnsi(line);
-        if (stripped.isEmpty()) {
-            return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, line));
+        String rawDetails = json.toString(2);
+        if (typeLower.equals("sessionupdate")) {
+            JSONObject data = json.optJSONObject("data");
+            if (data == null) {
+                return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, ""));
+            }
+            JSONObject update = data.optJSONObject("update");
+            if (update == null) {
+                return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, ""));
+            }
+            return classifyAcpUpdate(lineNumber, update, rawDetails);
         }
-        int prefixIdx = stripped.indexOf("> ");
-        if (prefixIdx >= 0) {
-            String content = stripped.substring(prefixIdx + 2);
-            if (content.isEmpty()) {
-                return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, line));
+        if (typeLower.equals("runfinished")) {
+            JSONObject data = json.optJSONObject("data");
+            if (data == null) {
+                return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, ""));
+            }
+            String stopReason = LogFormatUtils.firstNonEmpty(data, "stopReason", "stop_reason");
+            if (stopReason.isEmpty()) {
+                return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, ""));
             }
             return List.of(
-                    AiAgentLogParser.ParsedLine.message(
-                            lineNumber, "assistant", "Assistant", content, line, false));
+                    AiAgentLogParser.ParsedLine.result(
+                            lineNumber,
+                            "result",
+                            "Result",
+                            LogFormatUtils.capitalize(stopReason),
+                            rawDetails));
         }
-        return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, line));
+        if (typeLower.equals("runstarted") || typeLower.equals("metadata")) {
+            return List.of(AiAgentLogParser.ParsedLine.raw(lineNumber, ""));
+        }
+        return null;
     }
 
     private static String extractSessionText(JSONArray contentArray) {
@@ -347,13 +386,12 @@ public final class KiroLogFormat implements AiAgentLogFormat {
         if (result == null) return "Tool";
         JSONObject tool = result.optJSONObject("tool");
         if (tool == null) return "Tool";
-        JSONObject builtIn = tool.optJSONObject("kind");
-        if (builtIn == null) return "Tool";
-        return builtIn.keys().hasNext() ? builtIn.keys().next() : "Tool";
-    }
-
-    private static String stripAnsi(String text) {
-        if (text == null || text.isEmpty()) return text;
-        return text.replaceAll("(?:\u001b)?\\[[0-9;]*m", "");
+        JSONObject kind = tool.optJSONObject("kind");
+        if (kind == null) return "Tool";
+        JSONObject builtIn = kind.optJSONObject("BuiltIn");
+        if (builtIn != null && !builtIn.isEmpty()) {
+            return builtIn.keys().hasNext() ? builtIn.keys().next() : "Tool";
+        }
+        return kind.keys().hasNext() ? kind.keys().next() : "Tool";
     }
 }
